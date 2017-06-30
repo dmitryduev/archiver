@@ -161,10 +161,11 @@ class Archiver(object):
             ''' set up processing queue '''
             self.q = OrderedSetQueue()
 
-            # NOTE: now we need to map our queue over task_runner and gather results in another queue.
-            # this must be done in subclass since specific tasks/jobs should be defined there
-            self.futures = None
-            self.results = None
+            # now we need to map our queue over task_runner and gather results in another queue.
+            # user must setup specific tasks/jobs in task_runner, which (unfortunatelly)
+            # cannot be defined inside a subclass -- only as a standalone function
+            self.futures = self.c.map(task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
+            self.results = self.c.gather(self.futures)  # Gather results
 
         except Exception as e:
             print(e)
@@ -252,24 +253,73 @@ class Archiver(object):
             self.shut_down_logger()
             self.logger, self.logger_utc_date = self.set_up_logging(_name='archive', _level=logging.INFO, _mode='a')
 
-    def task_runner(self):
-        """
-
-        :return:
-        """
-        raise NotImplementedError
-
 
 class RoboaoArchiver(Archiver):
     def __init__(self, config_file=None):
         # initialize super class
         super(RoboaoArchiver, self).__init__(config_file=config_file)
 
-        # finish distributed processing setup (see NOTE in Archiver)
-        self.futures = self.c.map(self.task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
-        self.results = self.c.gather(self.futures)  # Gather results
+
+def task_runner(argdict):
+    """
+        Helper function that maps over 'data'
+
+    :param argdict: json-dumped dictionary with (named) parameters for the task.
+                    must contain 'task' key with the task name known to this helper function
+            json.dumps is used to convert the dict to a hashable type - string - so that
+            it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
+            used instead of regular queues to be able to check if a task has been enqueued already
+    :return:
+    """
+    try:
+        # unpack jsonified dict:
+        argdict = json.loads(argdict)
+
+        # assert 'task' in argdict, 'specify which task to run'
+
+        print('running task {:s}'.format(argdict['task']))
+
+        if argdict['task'] == 'test':
+            out = job_test(argdict['a'])
+            print(out)
+
+        elif argdict['task'] == 'bogus':
+            out = job_bogus(argdict['a'])
+            print(out)
+
+        return True
+
+    except Exception as e:
+        print('task failed saying \"{:s}\"'.format(str(e)))
+        # traceback.print_exc()
+        return True
+
+
+def job_test(a):
+    for _i in range(200):
+        for _j in range(100):
+            for k in range(500):
+                a += 3 ** 2
+    return a
+
+
+def job_bogus(a):
+    for _i in range(200):
+        for _j in range(100):
+            for k in range(500):
+                a += 4 ** 2
+    return a
 
 
 if __name__ == '__main__':
 
-    arch = RoboaoArchiver('config.ini')
+    arch = RoboaoArchiver('config.json')
+
+    # fake tasks:
+    tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
+    tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
+
+    for task in tasks:
+        arch.q.put(task)
+
+    time.sleep(30)
