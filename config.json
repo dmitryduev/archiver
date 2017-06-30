@@ -1,10 +1,40 @@
 {
+  "server": {
+    "environment": "test",
+    "help": {
+      "self": "",
+      "environment": "'test' or 'production'"
+    }
+  },
   "path": {
     "path_logs": "logs",
 
     "help": {
       "self": "path to all kinds of stuff",
       "path_logs": "path to store logs"
+    }
+  },
+  "database": {
+    "host": "127.0.0.1",
+    "port": 27017,
+    "db": "roboao",
+    "user": "roboao",
+    "pwd": "roboaokicksass",
+    "replicaset": "analysis",
+    "collection_obs": "objects",
+    "collection_aux": "aux",
+    "collection_pwd": "users",
+    "help": {
+      "self": "Details about the database",
+      "host": "host running MongoDB replica from replica set",
+      "port": "port where MongoDB is running on host",
+      "db": "main DB dame",
+      "user": "global DB access user name",
+      "pwd": "global DB access password",
+      "replicaset": "replica set name",
+      "collection_obs": "collection with science data",
+      "collection_aux": "collection with auxiliary data (seeing, summary Strehls, contrast curves etc.)",
+      "collection_pwd": "collection with user login/data access credentials"
     }
   },
   "parallel": {
@@ -15,6 +45,23 @@
       "self": "settings for running parallel computation with dask.distributed",
       "n_workers": "number of separate processes",
       "threads_per_worker": "number of threads per process"
+    }
+  },
+  "misc": {
+    "logging_level": "debug",
+    "nap_at_night": true,
+    "nap_time_frame": "local",
+    "nap_time_start": "18:00",
+    "nap_time_stop": "04:00",
+    "loop_interval": 0.2,
+    "help": {
+      "self": "miscellaneous stuff",
+      "logging_level": "'debug', 'info', 'warning', 'error', or 'critical'",
+      "nap_at_night": "do not interfere with the nightly operations if true",
+      "nap_time_frame": "'local' or 'UTC'?",
+      "nap_time_start": "HH:MM in 24-hour format",
+      "nap_time_stop": "HH:MM in 24-hour format. could be next morning",
+      "loop_interval": "interval [minutes] to rerun the archiver"
     }
   }
 }
