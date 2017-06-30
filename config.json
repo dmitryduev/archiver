@@ -1,0 +1,20 @@
+{
+  "path": {
+    "path_logs": "logs",
+
+    "help": {
+      "self": "path to all kinds of stuff",
+      "path_logs": "path to store logs"
+    }
+  },
+  "parallel": {
+    "n_workers": 2,
+    "threads_per_worker": 1,
+
+    "help": {
+      "self": "settings for running parallel computation with dask.distributed",
+      "n_workers": "number of separate processes",
+      "threads_per_worker": "number of threads per process"
+    }
+  }
+}
