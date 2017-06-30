@@ -1,5 +1,4 @@
-## Processing flowcharts
-If you're seeking to understand that
+## Flowcharts
+If you're seeking to understand how things (should) work
 
-### PSF library management
 ![alt text](/doc/pipeline.png)
