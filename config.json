@@ -8,10 +8,15 @@
   },
   "path": {
     "path_logs": "logs",
-
+    "path_raw": ["/Users/dmitryduev/_caltech/roboao/_nas_data/VIC_data/"],
+    "path_archive": ["/Users/dmitryduev/_caltech/roboao/_archive/"],
+    "path_tmp": "/Users/dmitryduev/_caltech/roboao/_tmp/",
     "help": {
       "self": "path to all kinds of stuff",
-      "path_logs": "path to store logs"
+      "path_logs": "path to store logs",
+      "path_raw": "list with path(s) to data sources",
+      "path_archive": "list with path(s) to store processed data",
+      "path_tmp": "path to store temporary stuff"
     }
   },
   "database": {
@@ -48,6 +53,8 @@
     }
   },
   "misc": {
+    "archiving_start_date": "2016/03/05",
+    "max_retries": 20,
     "logging_level": "debug",
     "nap_at_night": true,
     "nap_time_frame": "local",
@@ -56,12 +63,64 @@
     "loop_interval": 0.2,
     "help": {
       "self": "miscellaneous stuff",
+      "archiving_start_date": "only look at data starting from this date",
+      "max_retries": "try redoing failed stuff this many times",
       "logging_level": "'debug', 'info', 'warning', 'error', or 'critical'",
       "nap_at_night": "do not interfere with the nightly operations if true",
       "nap_time_frame": "'local' or 'UTC'?",
       "nap_time_start": "HH:MM in 24-hour format",
       "nap_time_stop": "HH:MM in 24-hour format. could be next morning",
       "loop_interval": "interval [minutes] to rerun the archiver"
+    }
+  },
+  "pipeline": {
+    "bright_object": {
+      "high_contrast": {
+        "path_psf_reference_library": "/Users/dmitryduev/_caltech/roboao/_archive/psf_library.fits",
+        "win": 100,
+        "sigma": 5,
+        "nrefs": 5,
+        "klip": 1,
+
+        "help": {
+          "self": "high contrast PCA pipeline",
+          "path_psf_reference_library": "path to reference PSF library",
+          "win": "window size",
+          "sigma": "sigma level",
+          "nrefs": "number of reference PSFs to use",
+          "klip": "number of principal components to keep"
+        }
+      },
+      "strehl": {
+        "core_min": 0.04,
+        "halo_max": 1.0,
+
+        "help": {
+          "self": "parameters for calculating/characterizing Strehl ratio",
+          "core_min": "metrics [arcsec] to judge if an observation is good/bad: min core size",
+          "halo_max": "metrics [arcsec] to judge if an observation is good/bad: max halo size"
+        }
+      },
+      "help": {
+        "self": "bright object processing pipeline"
+      }
+    },
+    "faint_object": {
+      "win": 128,
+      "n_threads": 4,
+      "help": {
+        "self": "faint object processing pipeline",
+        "win": "window size",
+        "n_threads": "number of threads to use in fftw"
+      }
+    },
+    "extended_object": {
+      "help": {
+        "self": "extended object processing pipeline"
+      }
+    },
+    "help": {
+      "self": "define pipeline parameters here"
     }
   }
 }

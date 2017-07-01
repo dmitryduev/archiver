@@ -1,6 +1,5 @@
 import argparse
 import signal
-
 import pytz
 from distributed import Client, LocalCluster
 from queue import Queue
@@ -158,9 +157,11 @@ class Archiver(object):
             then here:
             self.c = Client('127.0.0.1:8786')
             '''
-            cluster = LocalCluster(n_workers=self.config['parallel']['n_workers'],
-                                   threads_per_worker=self.config['parallel']['threads_per_worker'])
-            self.c = Client(cluster)
+            # set up a LocalCluster
+            self.cluster = LocalCluster(n_workers=self.config['parallel']['n_workers'],
+                                        threads_per_worker=self.config['parallel']['threads_per_worker'])
+            # connect to local cluster
+            self.c = Client(self.cluster)
 
             ''' set up processing queue '''
             self.q = OrderedSetQueue()
@@ -557,18 +558,79 @@ class RoboaoArchiver(Archiver):
 
         return True
 
+    def get_raw_data(self):
+        """
+            Parse sources containing raw data.
+        :return:
+        """
+        def is_date(_d, _fmt='%Y%m%d'):
+            """
+                Check if string (folder name) matches datetime format fmt
+            :param _d:
+            :param _fmt:
+            :return:
+            """
+            try:
+                datetime.datetime.strptime(_d, _fmt)
+            except Exception as e:
+                self.logger.error(e)
+                return False
+            return True
+
+        # get all dates with some raw data from all input sources
+        dates = dict()
+        # Robo-AO's NAS archive contains folders named as YYYYMMDD.
+        # Only consider data taken starting from archiving_start_date
+        for _p in self.config['path']['path_raw']:
+            dates[_p] = sorted([d for d in os.listdir(_p)
+                                if os.path.isdir(os.path.join(_p, d))
+                                and is_date(d, _fmt='%Y%m%d')
+                                and datetime.datetime.strptime(d, '%Y%m%d') >=
+                                datetime.datetime.strptime(self.config['misc']['archiving_start_date'], '%Y/%m/%d')])
+        return dates
+
     def cycle(self):
         """
             Main processing cycle
         :return:
         """
-        ''' check if DB connection is alive/established '''
-        connected = self.check_db_connection()
+        try:
+            while True:
+                # check if a new log file needs to be started
+                self.check_logging()
 
-        if connected:
-            pass
+                # check if DB connection is alive/established
+                connected = self.check_db_connection()
 
-        self.sleep()
+                if connected:
+                    # get all dates with raw data for each raw data location
+                    dates = self.get_raw_data()
+                    print(dates)
+
+                    # iterate over data locations:
+                    for location in dates:
+                        for date in dates[location]:
+                            # TODO: handle master calibration data
+
+                            # TODO: handle auxiliary data
+
+                            # TODO: get all observations
+
+                            # TODO: iterate over individual observations
+
+                            pass
+
+                self.sleep()
+        except KeyboardInterrupt:
+            self.logger.error('User exited the archiver.')
+            # try disconnecting from the database (if connected) and closing the cluster
+            try:
+                self.logger.info('Shutting down.')
+                self.disconnect_from_db()
+                self.cluster.close()
+            finally:
+                self.logger.info('Finished archiving cycle.')
+                return False
 
 
 def task_runner(argdict):
@@ -642,9 +704,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # go-go-go
+    # init archiver:
     arch = RoboaoArchiver(args.config_file)
 
+    # start the archiver main house-keeping cycle:
     arch.cycle()
 
     if False:
