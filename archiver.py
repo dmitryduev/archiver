@@ -7,12 +7,18 @@ import time
 import datetime
 import inspect
 import os
+import subprocess
+import numpy as np
+import glob
 import traceback
 import sys
 import json
 import logging
 import collections
 import pymongo
+import re
+from astropy.io import fits
+import pyprind
 
 
 class TimeoutError(Exception):
@@ -42,7 +48,7 @@ def timeout(seconds_before_timeout):
             try:
                 result = f(*args, **kwargs)
             finally:
-                if old_time_left > 0: # deduct f's run time from the saved timer
+                if old_time_left > 0:  # deduct f's run time from the saved timer
                     old_time_left -= time.time() - start_time
                 signal.signal(signal.SIGALRM, old)
                 signal.alarm(old_time_left)
@@ -175,7 +181,7 @@ class Archiver(object):
             ''' DB connection is handled in subclass '''
             self.db = None
 
-            ''' raw data is handled in subclass '''
+            ''' raw data are handled in subclass '''
             self.raw_data = None
 
         except Exception as e:
@@ -204,7 +210,7 @@ class Archiver(object):
 
         with open(config_path) as cjson:
             config_data = json.load(cjson)
-            # config should not be empty:
+            # config must not be empty:
             if len(config_data) > 0:
                 return config_data
             else:
@@ -300,9 +306,10 @@ class Archiver(object):
         """
         raise NotImplementedError
 
-    def get_raw_data(self):
+    def get_raw_data_descriptors(self):
         """
-            Parse sources containing raw data.
+            Parse sources containing raw data and get high-level descriptors (like dates),
+            by which raw data are sorted.
         :return:
         """
         raise NotImplementedError
@@ -316,10 +323,10 @@ class Archiver(object):
 
     def naptime(self):
         """
-            Return time to sleep in seconds for the archiving engine
+            Return time to sleep (in seconds) for archiving engine
             before waking up to rerun itself.
-             In the daytime, it's 1 hour
-             In the nap time, it's nap_time_start_utc - utc_now()
+             During "working hours", it's set up in the config
+             During nap time, it's nap_time_start_utc - utc_now()
         :return: time interval in seconds to sleep for
         """
         _config = self.config['misc']
@@ -420,11 +427,12 @@ class RoboaoArchiver(Archiver):
                 self.logger.debug('Connecting to the Robo-AO database at {:s}:{:d}'.
                                   format(_config['database']['host'], _config['database']['port']))
             if _config['server']['environment'] == 'production':
+                # in production, must set up replica set
                 _client = pymongo.MongoClient(host=_config['database']['host'], port=_config['database']['port'],
                                               replicaset=_config['database']['replicaset'],
                                               readPreference='primaryPreferred')
             else:
-                # standalone from my laptop:
+                # standalone from my laptop, when there's only one instance of DB
                 _client = pymongo.MongoClient(host=_config['database']['host'], port=_config['database']['port'])
             # grab main database:
             _db = _client[_config['database']['db']]
@@ -436,6 +444,7 @@ class RoboaoArchiver(Archiver):
             # raise error
             raise ConnectionRefusedError
         try:
+            # authenticate
             _db.authenticate(_config['database']['user'], _config['database']['pwd'])
             if self.logger is not None:
                 self.logger.debug('Successfully authenticated with the Robo-AO database at {:s}:{:d}'.
@@ -447,6 +456,7 @@ class RoboaoArchiver(Archiver):
                                   format(_config['database']['host'], _config['database']['port']))
             raise ConnectionRefusedError
         try:
+            # get collection with observations
             _coll_obs = _db[_config['database']['collection_obs']]
             if self.logger is not None:
                 self.logger.debug('Using collection {:s} with obs data in the database'.
@@ -458,6 +468,7 @@ class RoboaoArchiver(Archiver):
                                   format(_config['database']['collection_obs']))
             raise NameError
         try:
+            # get collection with auxiliary stuff
             _coll_aux = _db[_config['database']['collection_aux']]
             if self.logger is not None:
                 self.logger.debug('Using collection {:s} with aux data in the database'.
@@ -469,6 +480,7 @@ class RoboaoArchiver(Archiver):
                                   format(_config['database']['collection_aux']))
             raise NameError
         try:
+            # get collection with user access credentials
             _coll_usr = _db[_config['database']['collection_pwd']]
             if self.logger is not None:
                 self.logger.debug('Using collection {:s} with user access credentials in the database'.
@@ -501,7 +513,7 @@ class RoboaoArchiver(Archiver):
                 self.logger.error(_e)
 
         if self.logger is not None:
-            self.logger.debug('Successfully connected to the Robo-AO database at {:s}:{:d}'.
+            self.logger.debug('Successfully connected to Robo-AO database at {:s}:{:d}'.
                               format(_config['database']['host'], _config['database']['port']))
 
         # (re)define self.db
@@ -558,9 +570,9 @@ class RoboaoArchiver(Archiver):
 
         return True
 
-    def get_raw_data(self):
+    def get_raw_data_descriptors(self):
         """
-            Parse sources containing raw data.
+            Parse source(s) containing raw data and get dates with observational data.
         :return:
         """
         def is_date(_d, _fmt='%Y%m%d'):
@@ -581,13 +593,23 @@ class RoboaoArchiver(Archiver):
         dates = dict()
         # Robo-AO's NAS archive contains folders named as YYYYMMDD.
         # Only consider data taken starting from archiving_start_date
+        archiving_start_date = datetime.datetime.strptime(self.config['misc']['archiving_start_date'], '%Y/%m/%d')
         for _p in self.config['path']['path_raw']:
             dates[_p] = sorted([d for d in os.listdir(_p)
                                 if os.path.isdir(os.path.join(_p, d))
                                 and is_date(d, _fmt='%Y%m%d')
-                                and datetime.datetime.strptime(d, '%Y%m%d') >=
-                                datetime.datetime.strptime(self.config['misc']['archiving_start_date'], '%Y/%m/%d')])
+                                and datetime.datetime.strptime(d, '%Y%m%d') >= archiving_start_date
+                                ])
         return dates
+
+    def get_raw_data(self, _location, _date):
+        """
+            Get bzipped raw data file names at _location/_date
+        :param _location:
+        :param _date:
+        :return:
+        """
+        return sorted([os.path.basename(_p) for _p in glob.glob(os.path.join(_location, _date, '*.fits.bz2'))])
 
     def cycle(self):
         """
@@ -602,15 +624,45 @@ class RoboaoArchiver(Archiver):
                 # check if DB connection is alive/established
                 connected = self.check_db_connection()
 
+                if False:
+                    # fake tasks:
+                    tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
+                    tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
+
+                    for task in tasks:
+                        arch.q.put(task)
+
                 if connected:
                     # get all dates with raw data for each raw data location
-                    dates = self.get_raw_data()
+                    dates = self.get_raw_data_descriptors()
                     print(dates)
 
                     # iterate over data locations:
                     for location in dates:
                         for date in dates[location]:
-                            # TODO: handle master calibration data
+                            self.logger.debug('Processing {:s} at {:s}'.format(date, location))
+                            print(date)
+
+                            # get raw data file names:
+                            date_raw_data = self.get_raw_data(location, date)
+                            if len(date_raw_data) == 0:
+                                # no data? proceed to next date
+                                self.logger.debug('No data found for {:s}'.format(date))
+                                continue
+                            else:
+                                self.logger.debug('Found {:d} zipped fits-files for {:s}'.format(len(date_raw_data),
+                                                                                                 date))
+                            # print(date_raw_data)
+
+                            # TODO: handle calibration data
+                            try:
+                                self.calibration(location, date, date_raw_data)
+                            except Exception as _e:
+                                print(_e)
+                                traceback.print_exc()
+                                self.logger.error(_e)
+                                self.logger.error('Failed to process calibration data for {:s}.'.format(date))
+                                continue
 
                             # TODO: handle auxiliary data
 
@@ -618,9 +670,11 @@ class RoboaoArchiver(Archiver):
 
                             # TODO: iterate over individual observations
 
+
                             pass
 
                 self.sleep()
+
         except KeyboardInterrupt:
             self.logger.error('User exited the archiver.')
             # try disconnecting from the database (if connected) and closing the cluster
@@ -631,6 +685,237 @@ class RoboaoArchiver(Archiver):
             finally:
                 self.logger.info('Finished archiving cycle.')
                 return False
+
+    def calibration(self, _location, _date, _date_raw_data):
+        """
+            Handle calibration data
+
+            Originally written by N. Law
+        :param _location:
+        :param _date:
+        :param _date_raw_data:
+        :return:
+        """
+
+        def sigma_clip_combine(img, out_fn, normalise=False, dark_bias_sub=False):
+            """
+                Combine all frames in FITS file img
+            :param img:
+            :param out_fn:
+            :param normalise:
+            :param dark_bias_sub:
+            :return:
+            """
+
+            self.logger.debug('Making {:s}'.format(out_fn))
+            # two passes:
+            # 1/ generate average and RMS for each pixel
+            # 2/ sigma-clipped average and RMS for each pixel
+            # (i.e. only need to keep track of avg-sq and sq-avg arrays at any one time)
+            sx = img[0].shape[1]
+            sy = img[0].shape[0]
+
+            avg = np.zeros((sy, sx), dtype=np.float32)
+            avg_sq = np.zeros((sy, sx), dtype=np.float32)
+            n_dps = np.zeros((sy, sx), dtype=np.float32)
+
+            print("Image size:", sx, sy, len(img))
+            self.logger.debug('Image size: {:d} {:d} {:d}'.format(sx, sy, len(img)))
+
+            print("First pass")
+            self.logger.debug("First pass")
+
+            for i in img:
+                avg += i.data
+                avg_sq += i.data * i.data
+
+            avg = avg / float(len(img))
+            rms = np.sqrt((avg_sq / float(len(img))) - (avg * avg))
+
+            # fits.PrimaryHDU(avg).writeto("avg.fits",clobber=True)
+            # fits.PrimaryHDU(rms).writeto("rms.fits",clobber=True)
+
+            sigma_clip_avg = np.zeros((sy, sx), dtype=np.float32)
+            sigma_clip_n = np.zeros((sy, sx), dtype=np.float32)
+
+            print("Second pass")
+            for i in img:
+                sigma_mask = np.fabs((np.array(i.data, dtype=np.float32) - avg) / rms)
+
+                sigma_mask[sigma_mask > 3.0] = 100
+                sigma_mask[sigma_mask <= 1.0] = 1
+                sigma_mask[sigma_mask == 100] = 0
+
+                sigma_clip_avg += i.data * sigma_mask
+                sigma_clip_n += sigma_mask
+
+            sigma_clip_avg /= sigma_clip_n
+
+            # set the average flat level to 1.0
+            if normalise:
+                sigma_clip_avg /= np.average(sigma_clip_avg[np.isfinite(sigma_clip_avg)])
+
+            if dark_bias_sub:
+                sigma_clip_avg -= np.average(sigma_clip_avg[sy - 50:sy, sx - 50:sx])
+
+            fits.PrimaryHDU(sigma_clip_avg).writeto(out_fn, clobber=True)
+
+        # path to zipped raw files
+        path_date = os.path.join(_location, _date)
+
+        # get calibration file names:
+        pattern_fits = r'.fits.bz2\Z'
+        bias = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('bias_', s) is not None]
+        flat = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('flat_', s) is not None]
+        dark = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('dark_', s) is not None]
+
+        # TODO: check in database if needs to be (re)done
+
+
+        n_darks = len(dark)
+        n_flats = len(flat)
+
+        if n_darks > 9 and n_flats > 4:
+
+            # output dir
+            _path_out = os.path.join(self.config['path']['path_archive'], _date, 'calib')
+            if not os.path.exists(os.path.join(_path_out)):
+                os.makedirs(os.path.join(_path_out))
+
+            # find the combine the darks:
+            for d in dark:
+                # file name with extension
+                fz = '{:s}.fits.bz2'.format(d)
+                f = '{:s}.fits'.format(d)
+                camera_mode = f.split('_')[1]
+                if camera_mode != '0':
+                    # mode 0 is handled below
+
+                    # unzip:
+                    lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
+
+                    unzipped = os.path.join(self.config['path']['path_tmp'], f)
+
+                    out_fn = os.path.join(_path_out, 'dark_{:s}.fits'.format(camera_mode))
+                    with fits.open(unzipped) as img:
+                        sigma_clip_combine(img, out_fn, dark_bias_sub=True)
+
+                    # clean up after yoself!
+                    try:
+                        os.remove(unzipped)
+                    except Exception as _e:
+                        self.logger.error(_e)
+
+            # generate the flats' dark
+            # those files with mode '0' are the relevant ones:
+            fz = ['{:s}.fits.bz2'.format(d) for d in dark if d.split('_')[1] == '0']
+            f = ['{:s}.fits'.format(d) for d in dark if d.split('_')[1] == '0']
+            unzipped = [os.path.join(self.config['path']['path_tmp'], _f) for _f in f]
+
+            # unzip:
+            lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
+
+            img = []
+            for uz in unzipped:
+                img.append(fits.open(uz)[0])
+                # clean up after yoself!
+                try:
+                    os.remove(uz)
+                except Exception as _e:
+                    self.logger.error(_e)
+
+            flat_dark_fn = os.path.join(_path_out, 'dark_0.fits')
+            sigma_clip_combine(img, flat_dark_fn, dark_bias_sub=False)
+
+            with fits.open(flat_dark_fn) as fdn:
+                flat_dark = np.array(fdn[0].data, dtype=np.float32)
+
+            # make the flats:
+            for filt in ["Sg", "Si", "Sr", "Sz", "lp600", "c"]:
+                print("Making {:s} flat".format(filt))
+                flats = []
+
+                fz = ['{:s}.fits.bz2'.format(_f) for _f in flat if _f.split('_')[2] == filt]
+                f = ['{:s}.fits'.format(_f) for _f in flat if _f.split('_')[2] == filt]
+                unzipped = [os.path.join(self.config['path']['path_tmp'], _f) for _f in f]
+
+                # unzip:
+                lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
+
+                for uz in unzipped:
+
+                    flt = fits.open(uz)[0]
+                    flt.data = np.array(flt.data, dtype=np.float32)
+                    flt.data -= flat_dark
+                    # clean up after yoself!
+                    try:
+                        os.remove(uz)
+                    except Exception as _e:
+                        self.logger.error(_e)
+
+                    flats.append(flt)
+
+                out_fn = os.path.join(_path_out, 'flat_{:s}.fits'.format(filt))
+                sigma_clip_combine(flats, out_fn, normalise=True)
+
+        else:
+            raise RuntimeError('No enough calibration files for {:s}'.format(_date))
+
+
+def lbunzip2(_path_in, _files, _path_out, _keep=True, _v=False):
+
+    """
+        A wrapper around lbunzip2 - a parallel version of bunzip2
+    :param _path_in: folder with the files to be unzipped
+    :param _files: string or list of strings with file names to be uncompressed
+    :param _path_out: folder to place the output
+    :param _keep: keep the original?
+    :return:
+    """
+
+    try:
+        p0 = subprocess.Popen(['lbunzip2'])
+        p0.wait()
+    except Exception as _e:
+        print(_e)
+        print('lbzip2 not installed in the system. go ahead and install it!')
+        return False
+
+    if isinstance(_files, str):
+        _files_list = [_files]
+    else:
+        _files_list = _files
+
+    files_size = sum([os.stat(os.path.join(_path_in, fs)).st_size for fs in _files_list])
+    # print(files_size)
+
+    if _v:
+        bar = pyprind.ProgBar(files_size, stream=1, title='Unzipping files', monitor=True)
+    for _file in _files_list:
+        file_in = os.path.join(_path_in, _file)
+        file_out = os.path.join(_path_out, os.path.splitext(_file)[0])
+        if os.path.exists(file_out) and os.stat(file_out).st_size != 0:
+            # print('uncompressed file {:s} already exists, skipping'.format(file_in))
+            if _v:
+                bar.update(iterations=os.stat(file_in).st_size)
+            continue
+        # else go ahead
+        # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
+        with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
+            _p = subprocess.Popen('lbunzip2'.split(), stdin=subprocess.PIPE, stdout=_f_out)
+            _p.communicate(input=_f_in.read())
+            # wait for it to finish
+            _p.wait()
+        # remove the original if requested:
+        if not _keep:
+            _p = subprocess.Popen(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))])
+            # wait for it to finish
+            _p.wait()
+            # pass
+        if _v:
+            bar.update(iterations=os.stat(file_in).st_size)
+
+    return True
 
 
 def task_runner(argdict):
@@ -689,6 +974,7 @@ class Observation(object):
     pass
 
 
+# TODO:
 class Pipeline(object):
     pass
 
@@ -709,13 +995,3 @@ if __name__ == '__main__':
 
     # start the archiver main house-keeping cycle:
     arch.cycle()
-
-    if False:
-        # fake tasks:
-        tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
-        tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
-
-        for task in tasks:
-            arch.q.put(task)
-
-    # time.sleep(10)

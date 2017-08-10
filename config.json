@@ -9,13 +9,13 @@
   "path": {
     "path_logs": "logs",
     "path_raw": ["/Users/dmitryduev/_caltech/roboao/_nas_data/VIC_data/"],
-    "path_archive": ["/Users/dmitryduev/_caltech/roboao/_archive/"],
+    "path_archive": "/Users/dmitryduev/_caltech/roboao/_archive/",
     "path_tmp": "/Users/dmitryduev/_caltech/roboao/_tmp/",
     "help": {
       "self": "path to all kinds of stuff",
       "path_logs": "path to store logs",
       "path_raw": "list with path(s) to data sources",
-      "path_archive": "list with path(s) to store processed data",
+      "path_archive": "list with path to store processed data",
       "path_tmp": "path to store temporary stuff"
     }
   },
@@ -63,7 +63,7 @@
     "loop_interval": 0.2,
     "help": {
       "self": "miscellaneous stuff",
-      "archiving_start_date": "only look at data starting from this date",
+      "archiving_start_date": "only look at data starting from date YYYY/MM/DD",
       "max_retries": "try redoing failed stuff this many times",
       "logging_level": "'debug', 'info', 'warning', 'error', or 'critical'",
       "nap_at_night": "do not interfere with the nightly operations if true",
