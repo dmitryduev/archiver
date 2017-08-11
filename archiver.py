@@ -710,7 +710,8 @@ class RoboaoArchiver(Archiver):
                                 ])
         return dates
 
-    def get_raw_data(self, _location, _date):
+    @staticmethod
+    def get_raw_data(_location, _date):
         """
             Get bzipped raw data file names at _location/_date
         :param _location:
@@ -951,7 +952,7 @@ class RoboaoArchiver(Archiver):
                             self.logger.debug('Processing {:s} at {:s}'.format(date, location))
                             print(date)
 
-                            # get all raw data file names for the date:
+                            # get all raw data file names for the date, including calibration, seeing, and pointing:
                             try:
                                 date_raw_data = self.get_raw_data(location, date)
                                 if len(date_raw_data) == 0:
@@ -971,7 +972,7 @@ class RoboaoArchiver(Archiver):
                             ''' auxiliary data '''
                             # look up aux entry for date in the database:
                             try:
-                                select = self.db['coll_aux'].find_one({'_id': date})
+                                select = self.db['coll_aux'].find_one({'_id': date}, max_time_ms=5000)
                                 # if entry not in database, create empty one and populate it
                                 if select is None:
                                     # insert empty entry for date into aux database:
@@ -995,11 +996,59 @@ class RoboaoArchiver(Archiver):
                                 self.logger.error('Failed to process calibration data for {:s}.'.format(date))
                                 continue
 
-                            # TODO: handle auxiliary data
+                            # TODO: handle auxiliary data (seeing, summary contrast curves and Strehl ratios)
 
-                            # TODO: get all observations
+                            # once done with aux data processing, get entry from aux collection in DB:
+                            # look up aux entry for date in the database:
+                            try:
+                                aux_date = self.db['coll_aux'].find_one({'_id': date}, max_time_ms=5000)
+                            except RuntimeError as _e:
+                                print(_e)
+                                traceback.print_exc()
+                                self.logger.error(_e)
+                                self.logger.error('Error in handling aux database entry for {:s}.'.format(date))
+                                continue
+
+                            ''' science data '''
+                            # get all science observations
+                            try:
+                                # skip calibration files and pointings
+                                date_obs = [re.split(pattern_fits, s)[0] for s in date_raw_data
+                                            if re.search(pattern_end, s) is not None and
+                                            re.match(pattern_start, s) is not None and
+                                            re.match('bias_', s) is None and
+                                            re.match('dark_', s) is None and
+                                            re.match('flat_', s) is None and
+                                            re.match('pointing_', s) is None and
+                                            re.match('seeing_', s) is None]
+                                print(date_obs)
+                                if len(date_obs) == 0:
+                                    # no data? proceed to next date
+                                    self.logger.info('No science data found for {:s}'.format(date))
+                                    continue
+                                else:
+                                    self.logger.debug(
+                                        'Found {:d} zipped science fits-files for {:s}'.format(len(date_raw_data),
+                                                                                               date))
+                            except RuntimeError as _e:
+                                print(_e)
+                                traceback.print_exc()
+                                self.logger.error(_e)
+                                self.logger.error('Failed to get all raw science data file names for {:s}.'
+                                                  .format(date))
+                                continue
 
                             # TODO: iterate over individual observations
+                            for obs in date_obs:
+                                try:
+                                    # look up entry for obs in DB:
+                                    select = self.db['coll_obs'].find_one({'_id': obs}, max_time_ms=10000)
+                                except RuntimeError as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Failed to look up entry for {:s} in DB.'.format(obs))
+                                    continue
 
                 self.sleep()
 
@@ -1119,8 +1168,8 @@ class RoboaoArchiver(Archiver):
             avg = avg / float(len(img))
             rms = np.sqrt((avg_sq / float(len(img))) - (avg * avg))
 
-            # fits.PrimaryHDU(avg).writeto("avg.fits",clobber=True)
-            # fits.PrimaryHDU(rms).writeto("rms.fits",clobber=True)
+            # fits.PrimaryHDU(avg).writeto("avg.fits", overwrite=True)
+            # fits.PrimaryHDU(rms).writeto("rms.fits", overwrite=True)
 
             sigma_clip_avg = np.zeros((sy, sx), dtype=np.float32)
             sigma_clip_n = np.zeros((sy, sx), dtype=np.float32)
@@ -1146,7 +1195,7 @@ class RoboaoArchiver(Archiver):
             if dark_bias_sub:
                 sigma_clip_avg -= np.average(sigma_clip_avg[sy - 50:sy, sx - 50:sx])
 
-            fits.PrimaryHDU(sigma_clip_avg).writeto(out_fn, clobber=True)
+            fits.PrimaryHDU(sigma_clip_avg).writeto(out_fn, overwrite=True)
             self.logger.debug("Successfully made {:s}".format(out_fn))
 
         # path to zipped raw files
@@ -1161,10 +1210,10 @@ class RoboaoArchiver(Archiver):
         flat = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('flat_', s) is not None]
         dark = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('dark_', s) is not None]
 
-        # TODO: check in database if needs to be (re)done
+        # check in database if needs to be (re)done
         _select = self.db['coll_aux'].find_one({'_id': _date})
 
-        # FIXME: this is not to break older entries. remove once in production
+        # FIXME: this is not to break older entries. remove once production ready
         if 'calib' not in _select:
             _select['calib'] = self.empty_db_aux_entry(None)['calib']
 
@@ -1350,12 +1399,50 @@ def job_bogus(a):
 
 # TODO:
 class Observation(object):
-    pass
+    def __int__(self, _id=None, _aux=None):
+        """
+            Initialize Observation object
+        :param _id:
+        :param _aux:
+        :return:
+        """
+        assert _id is not None, 'Must specify unique obs id'
+        # obs unique id:
+        self.id = _id
+
+    def parse(self):
+        """
+            Parse obs info (e.g. contained in id, or fits header) to be injected into DB
+        :return:
+        """
+        raise NotImplementedError
+
+    def init_db_entry(self):
+        """
+            Initialize DB entry
+        :return:
+        """
+        raise NotImplementedError
+
+    def update_db_entry(self):
+        """
+            Update DB entry
+        :return:
+        """
+        raise NotImplementedError
+
+    def pipeline(self):
+        """
+            Define decision chain for observation pipelining
+        :return:
+        """
+        raise NotImplementedError
 
 
 # TODO:
 class Pipeline(object):
-    pass
+    def __init__(self):
+        pass
 
 
 if __name__ == '__main__':
