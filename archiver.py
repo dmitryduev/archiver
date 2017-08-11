@@ -19,10 +19,114 @@ import pymongo
 import re
 from astropy.io import fits
 import pyprind
+import functools
+
+
+def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
+
+    """
+        A wrapper around lbunzip2 - a parallel version of bunzip2
+    :param _path_in: folder with the files to be unzipped
+    :param _files: string or list of strings with file names to be uncompressed
+    :param _path_out: folder to place the output
+    :param _rewrite: rewrite if output exists?
+    :param _keep: keep the original?
+    :param _v: verbose?
+    :return:
+    """
+
+    try:
+        p0 = subprocess.Popen(['lbunzip2'])
+        p0.wait()
+    except Exception as _e:
+        print(_e)
+        print('lbzip2 not installed in the system. go ahead and install it!')
+        return False
+
+    if isinstance(_files, str):
+        _files_list = [_files]
+    else:
+        _files_list = _files
+
+    files_size = sum([os.stat(os.path.join(_path_in, fs)).st_size for fs in _files_list])
+    # print(files_size)
+
+    if _v:
+        bar = pyprind.ProgBar(files_size, stream=1, title='Unzipping files', monitor=True)
+    for _file in _files_list:
+        file_in = os.path.join(_path_in, _file)
+        file_out = os.path.join(_path_out, os.path.splitext(_file)[0])
+
+        if not _rewrite:
+            if os.path.exists(file_out) and os.stat(file_out).st_size != 0:
+                # print('uncompressed file {:s} already exists, skipping'.format(file_in))
+                if _v:
+                    bar.update(iterations=os.stat(file_in).st_size)
+                continue
+        # else go ahead
+        # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
+        with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
+            _p = subprocess.Popen('lbunzip2'.split(), stdin=subprocess.PIPE, stdout=_f_out)
+            _p.communicate(input=_f_in.read())
+            # wait for it to finish
+            _p.wait()
+        # remove the original if requested:
+        if not _keep:
+            _p = subprocess.Popen(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))])
+            # wait for it to finish
+            _p.wait()
+            # pass
+        if _v:
+            bar.update(iterations=os.stat(file_in).st_size)
+
+    return True
+
+
+def memoize(f):
+    """ Minimalistic memoization decorator.
+    http://code.activestate.com/recipes/577219-minimalistic-memoization/ """
+
+    cache = {}
+
+    @functools.wraps(f)
+    def memf(*x):
+        if x not in cache:
+            cache[x] = f(*x)
+        return cache[x]
+    return memf
+
+
+def mdate_walk(_path):
+    """
+        Inspect directory tree contents to get max mdate of all files within it
+    :param _path:
+    :return:
+    """
+    if not os.path.exists(_path):
+        return utc_now()
+    # modified time for the parent folder:
+    mtime = datetime.datetime.utcfromtimestamp(os.stat(_path).st_mtime)
+    # print(mtime)
+    for root, _, files in os.walk(_path, topdown=False):
+        # only check the files:
+        for _f in files:
+            path_f = os.path.join(root, _f)
+            mtime_f = datetime.datetime.utcfromtimestamp(os.stat(path_f).st_mtime)
+            if mtime_f > mtime:
+                mtime = mtime_f
+            # print(path_f, mtime_f)
+        # don't actually need to check dirs
+        # for _d in dirs:
+        #     print(os.path.join(root, _d))
+    return mtime
+
+
+def utc_now():
+    return datetime.datetime.now(pytz.utc)
 
 
 class TimeoutError(Exception):
-    def __init__(self, value="operation timed out"):
+    def __init__(self, value="Operation timed out"):
         self.value = value
 
     def __str__(self):
@@ -53,7 +157,7 @@ def timeout(seconds_before_timeout):
                 signal.signal(signal.SIGALRM, old)
                 signal.alarm(old_time_left)
             return result
-        new_f.func_name = f.func_name
+        new_f.__name__ = f.__name__
         return new_f
     return decorate
 
@@ -416,6 +520,7 @@ class RoboaoArchiver(Archiver):
         # will exit if this fails
         self.connect_to_db()
 
+    @timeout(seconds_before_timeout=60)
     def connect_to_db(self):
         """
             Connect to Robo-AO's MongoDB-powered database
@@ -524,6 +629,7 @@ class RoboaoArchiver(Archiver):
         self.db['coll_aux'] = _coll_aux
         self.db['program_pi'] = _program_pi
 
+    @timeout(seconds_before_timeout=60)
     def disconnect_from_db(self):
         """
             Disconnect from Robo-AO's MongoDB database.
@@ -543,6 +649,7 @@ class RoboaoArchiver(Archiver):
         else:
             self.logger.debug('No connection found.')
 
+    @timeout(seconds_before_timeout=60)
     def check_db_connection(self):
         """
             Check if DB connection is alive/established.
@@ -570,6 +677,7 @@ class RoboaoArchiver(Archiver):
 
         return True
 
+    @timeout(seconds_before_timeout=60)
     def get_raw_data_descriptors(self):
         """
             Parse source(s) containing raw data and get dates with observational data.
@@ -611,12 +719,210 @@ class RoboaoArchiver(Archiver):
         """
         return sorted([os.path.basename(_p) for _p in glob.glob(os.path.join(_location, _date, '*.fits.bz2'))])
 
+    @timeout(seconds_before_timeout=30)
+    def db_insert(self, _collection=None, _doc=None):
+        """
+            Insert a document _doc to collection _collection in DB.
+            It is monitored for timeout in case DB connection hangs for some reason
+        :param _collection:
+        :param _doc:
+        :return:
+        """
+        assert _collection is not None, 'Must specify collection'
+        assert _doc is not None, 'Must specify document'
+        self.db['coll_aux'].insert_one(_doc)
+
+    @staticmethod
+    def empty_db_aux_entry(_date):
+        """
+                A dummy database record for a science observation
+            :param: _date YYYYMMDD which serves as _id
+            :return:
+            """
+        time_now_utc = utc_now()
+        return {
+            '_id': _date,
+            'calib': {'done': False,
+                      'raw': {'bias': [],
+                              'dark': [],
+                              'flat': []},
+                      'retries': 0,
+                      'last_modified': time_now_utc},
+            'seeing': {'done': False,
+                       'frames': [],
+                       'retries': 0,
+                       'last_modified': time_now_utc},
+            'contrast_curve': {'done': False,
+                               'retries': 0,
+                               'last_modified': time_now_utc},
+            'strehl': {'done': False,
+                       'retries': 0,
+                       'last_modified': time_now_utc}
+               }
+
+    @staticmethod
+    def empty_db_science_entry():
+        """
+                A dummy database record for a science observation
+            :return:
+            """
+        time_now_utc = utc_now()
+        return {
+            '_id': None,
+            'date_added': time_now_utc,
+            'name': None,
+            'alternative_names': [],
+            'science_program': {
+                'program_id': None,
+                'program_PI': None
+            },
+            'date_utc': None,
+            'telescope': None,
+            'camera': None,
+            'filter': None,
+            'exposure': None,
+            'magnitude': None,
+            'coordinates': {
+                'epoch': None,
+                'radec': None,
+                'radec_str': None,
+                # 'radec_geojson': None,
+                'azel': None
+            },
+            'pipelined': {
+                'automated': {
+                    'status': {
+                        'done': False
+                    },
+                    'preview': {
+                        'force_redo': False,
+                        'done': False,
+                        'retries': 0,
+                        'last_modified': time_now_utc
+                    },
+                    'location': [],
+                    'classified_as': None,
+                    'fits_header': {},
+                    'strehl': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'lock_position': None,
+                        'ratio_percent': None,
+                        'core_arcsec': None,
+                        'halo_arcsec': None,
+                        'fwhm_arcsec': None,
+                        'flag': None,
+                        'last_modified': time_now_utc
+                    },
+                    'pca': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'preview': {
+                            'force_redo': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'location': [],
+                        'lock_position': None,
+                        'contrast_curve': None,
+                        'last_modified': time_now_utc
+                    },
+                    'last_modified': time_now_utc
+                },
+                'faint': {
+                    'status': {
+                        'force_redo': False,
+                        'enqueued': False,
+                        'done': False,
+                        'retries': 0
+                    },
+                    'preview': {
+                        'force_redo': False,
+                        'done': False,
+                        'retries': 0,
+                        'last_modified': time_now_utc
+                    },
+                    'location': [],
+                    'lock_position': None,
+                    'fits_header': {},
+                    'shifts': None,
+                    'strehl': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'lock_position': None,
+                        'ratio_percent': None,
+                        'core_arcsec': None,
+                        'halo_arcsec': None,
+                        'fwhm_arcsec': None,
+                        'flag': None,
+                        'last_modified': time_now_utc
+                    },
+                    'pca': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'preview': {
+                            'force_redo': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'location': [],
+                        'lock_position': None,
+                        'contrast_curve': None,
+                        'last_modified': time_now_utc
+                    },
+                    'last_modified': time_now_utc
+                },
+
+            },
+
+            'seeing': {
+                'median': None,
+                'mean': None,
+                'nearest': None,
+                'last_modified': time_now_utc
+            },
+            'distributed': {
+                'status': False,
+                'location': [],
+                'last_modified': time_now_utc
+            },
+            'raw_data': {
+                'location': [],
+                'data': [],
+                'last_modified': time_now_utc
+            },
+            'comment': None
+        }
+
     def cycle(self):
         """
             Main processing cycle
         :return:
         """
         try:
+            # check the endings (\Z) and skip _N.fits.bz2:
+            # science obs must start with program number (e.g. 24_ or 24.1_)
+            pattern_start = r'\d+.?\d??_'
+            # must be a bzipped fits file
+            pattern_end = r'.[0-9]{6}.fits.bz2\Z'
+            pattern_fits = r'.fits.bz2\Z'
+
             while True:
                 # check if a new log file needs to be started
                 self.check_logging()
@@ -640,26 +946,51 @@ class RoboaoArchiver(Archiver):
                     # iterate over data locations:
                     for location in dates:
                         for date in dates[location]:
+                            # Each individual step where I know something could go wrong is placed inside try-except
+                            # clause. Everything else is captured outside causing the main while loop to terminate.
                             self.logger.debug('Processing {:s} at {:s}'.format(date, location))
                             print(date)
 
-                            # get raw data file names:
-                            date_raw_data = self.get_raw_data(location, date)
-                            if len(date_raw_data) == 0:
-                                # no data? proceed to next date
-                                self.logger.debug('No data found for {:s}'.format(date))
-                                continue
-                            else:
-                                self.logger.debug('Found {:d} zipped fits-files for {:s}'.format(len(date_raw_data),
-                                                                                                 date))
-                            # print(date_raw_data)
-
-                            # TODO: handle calibration data
+                            # get all raw data file names for the date:
                             try:
+                                date_raw_data = self.get_raw_data(location, date)
+                                if len(date_raw_data) == 0:
+                                    # no data? proceed to next date
+                                    self.logger.debug('No data found for {:s}'.format(date))
+                                    continue
+                                else:
+                                    self.logger.debug('Found {:d} zipped fits-files for {:s}'.format(len(date_raw_data),
+                                                                                                     date))
+                            except RuntimeError as _e:
+                                print(_e)
+                                traceback.print_exc()
+                                self.logger.error(_e)
+                                self.logger.error('Failed to get all raw data file names for {:s}.'.format(date))
+                                continue
+
+                            ''' auxiliary data '''
+                            # look up aux entry for date in the database:
+                            try:
+                                select = self.db['coll_aux'].find_one({'_id': date})
+                                # if entry not in database, create empty one and populate it
+                                if select is None:
+                                    # insert empty entry for date into aux database:
+                                    self.db_insert(_collection='coll_aux', _doc=self.empty_db_aux_entry(date))
+                            except RuntimeError as _e:
+                                print(_e)
+                                traceback.print_exc()
+                                self.logger.error(_e)
+                                self.logger.error('Error in handling aux database entry for {:s}.'.format(date))
+                                continue
+
+                            # handle calibration data
+                            try:
+                                # we do this in a serial way, i.e. before proceeding with everything else
+                                # because calibration data are needed by everything else
                                 self.calibration(location, date, date_raw_data)
                             except Exception as _e:
                                 print(_e)
-                                traceback.print_exc()
+                                # traceback.print_exc()
                                 self.logger.error(_e)
                                 self.logger.error('Failed to process calibration data for {:s}.'.format(date))
                                 continue
@@ -670,12 +1001,10 @@ class RoboaoArchiver(Archiver):
 
                             # TODO: iterate over individual observations
 
-
-                            pass
-
                 self.sleep()
 
         except KeyboardInterrupt:
+            # user ctrl-c'ed
             self.logger.error('User exited the archiver.')
             # try disconnecting from the database (if connected) and closing the cluster
             try:
@@ -686,9 +1015,67 @@ class RoboaoArchiver(Archiver):
                 self.logger.info('Finished archiving cycle.')
                 return False
 
+        except RuntimeError as e:
+            # any other error not captured otherwise
+            print(e)
+            traceback.print_exc()
+            self.logger.error(e)
+            self.logger.error('Unknown error, exiting. Please check the logs.')
+            try:
+                self.logger.info('Shutting down.')
+                self.disconnect_from_db()
+                self.cluster.close()
+            finally:
+                self.logger.info('Finished archiving cycle.')
+                return False
+
+    @timeout(seconds_before_timeout=60)
+    def load_darks_and_flats(self, _date, _mode, _filt, image_size_x=1024):
+        """
+            Load darks and flats
+        :param _date:
+        :param _mode:
+        :param _filt:
+        :param image_size_x:
+        :return:
+        """
+        try:
+            _path_calib = os.path.join(self.config['path_archive', _date, 'calib'])
+            if image_size_x == 256:
+                dark_image = os.path.join(_path_calib, 'dark_{:s}4.fits'.format(str(_mode)))
+            else:
+                dark_image = os.path.join(_path_calib, 'dark_{:s}.fits'.format(str(_mode)))
+            flat_image = os.path.join(_path_calib, 'flat_{:s}.fits'.format(_filt))
+
+            if not os.path.exists(dark_image) or not os.path.exists(flat_image):
+                return None, None
+            else:
+                with fits.open(dark_image) as dark, fits.open(flat_image) as flat:
+                    # replace NaNs if necessary
+                    if image_size_x == 256:
+                        return np.nan_to_num(dark[0].data), np.nan_to_num(flat[0].data[384:640, 384:640])
+                    else:
+                        return np.nan_to_num(dark[0].data), np.nan_to_num(flat[0].data)
+        except RuntimeError:
+            # Failed? Make sure to mark calib.done in DB as False!
+            self.db['coll_aux'].update_one(
+                {'_id': _date},
+                {
+                    '$set': {
+                        'calib.done': False,
+                        'calib.raw.flat': [],
+                        'calib.raw.dark': [],
+                        'calib.last_modified': utc_now()
+                    }
+                }
+            )
+
+    @timeout(seconds_before_timeout=600)
     def calibration(self, _location, _date, _date_raw_data):
         """
             Handle calibration data
+
+            It is monitored for timout
 
             Originally written by N. Law
         :param _location:
@@ -739,6 +1126,7 @@ class RoboaoArchiver(Archiver):
             sigma_clip_n = np.zeros((sy, sx), dtype=np.float32)
 
             print("Second pass")
+            self.logger.debug("Second pass")
             for i in img:
                 sigma_mask = np.fabs((np.array(i.data, dtype=np.float32) - avg) / rms)
 
@@ -759,9 +1147,13 @@ class RoboaoArchiver(Archiver):
                 sigma_clip_avg -= np.average(sigma_clip_avg[sy - 50:sy, sx - 50:sx])
 
             fits.PrimaryHDU(sigma_clip_avg).writeto(out_fn, clobber=True)
+            self.logger.debug("Successfully made {:s}".format(out_fn))
 
         # path to zipped raw files
         path_date = os.path.join(_location, _date)
+
+        # output dir
+        _path_out = os.path.join(self.config['path']['path_archive'], _date, 'calib')
 
         # get calibration file names:
         pattern_fits = r'.fits.bz2\Z'
@@ -770,152 +1162,139 @@ class RoboaoArchiver(Archiver):
         dark = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('dark_', s) is not None]
 
         # TODO: check in database if needs to be (re)done
+        _select = self.db['coll_aux'].find_one({'_id': _date})
 
+        # FIXME: this is not to break older entries. remove once in production
+        if 'calib' not in _select:
+            _select['calib'] = self.empty_db_aux_entry(None)['calib']
 
-        n_darks = len(dark)
-        n_flats = len(flat)
+        # check folder modified date:
+        time_tag = mdate_walk(_path_out)
 
-        if n_darks > 9 and n_flats > 4:
+        # not done or files changed?
+        if (not _select['calib']['done']) or \
+                (set(_select['calib']['raw']['flat']) != set(flat)) or \
+                (set(_select['calib']['raw']['dark']) != set(dark)) or \
+                (time_tag - _select['calib']['last_modified']).total_seconds() > 1.0:
+            make_calib = True
+        else:
+            make_calib = False
 
-            # output dir
-            _path_out = os.path.join(self.config['path']['path_archive'], _date, 'calib')
-            if not os.path.exists(os.path.join(_path_out)):
-                os.makedirs(os.path.join(_path_out))
+        if make_calib:
+            n_darks = len(dark)
+            n_flats = len(flat)
 
-            # find the combine the darks:
-            for d in dark:
-                # file name with extension
-                fz = '{:s}.fits.bz2'.format(d)
-                f = '{:s}.fits'.format(d)
-                camera_mode = f.split('_')[1]
-                if camera_mode != '0':
-                    # mode 0 is handled below
+            # enough data to make master calibration files?
+            if n_darks > 9 and n_flats > 4:
+                # update DB entry:
+                self.db['coll_aux'].update_one(
+                    {'_id': _date},
+                    {
+                        '$set': {
+                            'calib.done': False,
+                            'calib.raw.flat': flat,
+                            'calib.raw.dark': dark,
+                            'calib.last_modified': time_tag
+                        }
+                    }
+                )
 
-                    # unzip:
-                    lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
+                # output dir exists?
+                if not os.path.exists(os.path.join(_path_out)):
+                    os.makedirs(os.path.join(_path_out))
 
-                    unzipped = os.path.join(self.config['path']['path_tmp'], f)
+                # find the combine the darks:
+                for d in dark:
+                    # file name with extension
+                    fz = '{:s}.fits.bz2'.format(d)
+                    f = '{:s}.fits'.format(d)
+                    camera_mode = f.split('_')[1]
+                    if camera_mode != '0':
+                        # mode 0 is handled below
 
-                    out_fn = os.path.join(_path_out, 'dark_{:s}.fits'.format(camera_mode))
-                    with fits.open(unzipped) as img:
-                        sigma_clip_combine(img, out_fn, dark_bias_sub=True)
+                        # unzip:
+                        lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
 
-                    # clean up after yoself!
-                    try:
-                        os.remove(unzipped)
-                    except Exception as _e:
-                        self.logger.error(_e)
+                        unzipped = os.path.join(self.config['path']['path_tmp'], f)
 
-            # generate the flats' dark
-            # those files with mode '0' are the relevant ones:
-            fz = ['{:s}.fits.bz2'.format(d) for d in dark if d.split('_')[1] == '0']
-            f = ['{:s}.fits'.format(d) for d in dark if d.split('_')[1] == '0']
-            unzipped = [os.path.join(self.config['path']['path_tmp'], _f) for _f in f]
+                        out_fn = os.path.join(_path_out, 'dark_{:s}.fits'.format(camera_mode))
+                        with fits.open(unzipped) as img:
+                            sigma_clip_combine(img, out_fn, dark_bias_sub=True)
 
-            # unzip:
-            lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
+                        # clean up after yoself!
+                        try:
+                            os.remove(unzipped)
+                        except Exception as _e:
+                            self.logger.error(_e)
 
-            img = []
-            for uz in unzipped:
-                img.append(fits.open(uz)[0])
-                # clean up after yoself!
-                try:
-                    os.remove(uz)
-                except Exception as _e:
-                    self.logger.error(_e)
-
-            flat_dark_fn = os.path.join(_path_out, 'dark_0.fits')
-            sigma_clip_combine(img, flat_dark_fn, dark_bias_sub=False)
-
-            with fits.open(flat_dark_fn) as fdn:
-                flat_dark = np.array(fdn[0].data, dtype=np.float32)
-
-            # make the flats:
-            for filt in ["Sg", "Si", "Sr", "Sz", "lp600", "c"]:
-                print("Making {:s} flat".format(filt))
-                flats = []
-
-                fz = ['{:s}.fits.bz2'.format(_f) for _f in flat if _f.split('_')[2] == filt]
-                f = ['{:s}.fits'.format(_f) for _f in flat if _f.split('_')[2] == filt]
+                # generate the flats' dark
+                # those files with mode '0' are the relevant ones:
+                fz = ['{:s}.fits.bz2'.format(d) for d in dark if d.split('_')[1] == '0']
+                f = ['{:s}.fits'.format(d) for d in dark if d.split('_')[1] == '0']
                 unzipped = [os.path.join(self.config['path']['path_tmp'], _f) for _f in f]
 
                 # unzip:
                 lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
 
+                img = []
                 for uz in unzipped:
-
-                    flt = fits.open(uz)[0]
-                    flt.data = np.array(flt.data, dtype=np.float32)
-                    flt.data -= flat_dark
+                    img.append(fits.open(uz)[0])
                     # clean up after yoself!
                     try:
                         os.remove(uz)
                     except Exception as _e:
                         self.logger.error(_e)
 
-                    flats.append(flt)
+                flat_dark_fn = os.path.join(_path_out, 'dark_0.fits')
+                sigma_clip_combine(img, flat_dark_fn, dark_bias_sub=False)
 
-                out_fn = os.path.join(_path_out, 'flat_{:s}.fits'.format(filt))
-                sigma_clip_combine(flats, out_fn, normalise=True)
+                with fits.open(flat_dark_fn) as fdn:
+                    flat_dark = np.array(fdn[0].data, dtype=np.float32)
 
-        else:
-            raise RuntimeError('No enough calibration files for {:s}'.format(_date))
+                # make the flats:
+                for filt in ["Sg", "Si", "Sr", "Sz", "lp600", "c"]:
+                    print("Making {:s} flat".format(filt))
+                    flats = []
 
+                    fz = ['{:s}.fits.bz2'.format(_f) for _f in flat if _f.split('_')[2] == filt]
+                    f = ['{:s}.fits'.format(_f) for _f in flat if _f.split('_')[2] == filt]
+                    unzipped = [os.path.join(self.config['path']['path_tmp'], _f) for _f in f]
 
-def lbunzip2(_path_in, _files, _path_out, _keep=True, _v=False):
+                    # unzip:
+                    lbunzip2(_path_in=path_date, _files=fz, _path_out=self.config['path']['path_tmp'], _keep=True)
 
-    """
-        A wrapper around lbunzip2 - a parallel version of bunzip2
-    :param _path_in: folder with the files to be unzipped
-    :param _files: string or list of strings with file names to be uncompressed
-    :param _path_out: folder to place the output
-    :param _keep: keep the original?
-    :return:
-    """
+                    for uz in unzipped:
 
-    try:
-        p0 = subprocess.Popen(['lbunzip2'])
-        p0.wait()
-    except Exception as _e:
-        print(_e)
-        print('lbzip2 not installed in the system. go ahead and install it!')
-        return False
+                        flt = fits.open(uz)[0]
+                        flt.data = np.array(flt.data, dtype=np.float32)
+                        flt.data -= flat_dark
+                        # clean up after yoself!
+                        try:
+                            os.remove(uz)
+                        except Exception as _e:
+                            self.logger.error(_e)
 
-    if isinstance(_files, str):
-        _files_list = [_files]
-    else:
-        _files_list = _files
+                        flats.append(flt)
 
-    files_size = sum([os.stat(os.path.join(_path_in, fs)).st_size for fs in _files_list])
-    # print(files_size)
+                    out_fn = os.path.join(_path_out, 'flat_{:s}.fits'.format(filt))
+                    sigma_clip_combine(flats, out_fn, normalise=True)
 
-    if _v:
-        bar = pyprind.ProgBar(files_size, stream=1, title='Unzipping files', monitor=True)
-    for _file in _files_list:
-        file_in = os.path.join(_path_in, _file)
-        file_out = os.path.join(_path_out, os.path.splitext(_file)[0])
-        if os.path.exists(file_out) and os.stat(file_out).st_size != 0:
-            # print('uncompressed file {:s} already exists, skipping'.format(file_in))
-            if _v:
-                bar.update(iterations=os.stat(file_in).st_size)
-            continue
-        # else go ahead
-        # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
-        with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
-            _p = subprocess.Popen('lbunzip2'.split(), stdin=subprocess.PIPE, stdout=_f_out)
-            _p.communicate(input=_f_in.read())
-            # wait for it to finish
-            _p.wait()
-        # remove the original if requested:
-        if not _keep:
-            _p = subprocess.Popen(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))])
-            # wait for it to finish
-            _p.wait()
-            # pass
-        if _v:
-            bar.update(iterations=os.stat(file_in).st_size)
+                # success!
+                # check new folder modified date:
+                time_tag = mdate_walk(_path_out)
+                # update DB entry:
+                self.db['coll_aux'].update_one(
+                    {'_id': _date},
+                    {
+                        '$set': {
+                            'calib.done': True,
+                            'calib.last_modified': time_tag
+                        }
+                    }
+                )
 
-    return True
+            else:
+                raise RuntimeError('No enough calibration files for {:s}'.format(_date))
 
 
 def task_runner(argdict):
