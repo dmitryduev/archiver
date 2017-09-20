@@ -2,7 +2,7 @@
   "server": {
     "environment": "test",
     "help": {
-      "self": "",
+      "self": "global server settings",
       "environment": "'test' or 'production'"
     }
   },

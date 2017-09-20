@@ -1,5 +1,6 @@
 import argparse
 import signal
+from collections import OrderedDict
 import pytz
 from distributed import Client, LocalCluster
 from queue import Queue
@@ -126,7 +127,7 @@ def utc_now():
 
 
 class TimeoutError(Exception):
-    def __init__(self, value="Operation timed out"):
+    def __init__(self, value='Operation timed out'):
         self.value = value
 
     def __str__(self):
@@ -274,10 +275,11 @@ class Archiver(object):
             self.c = Client(self.cluster)
 
             ''' set up processing queue '''
+            # we will be submitting processing tasks to it
             self.q = OrderedSetQueue()
 
             # now we need to map our queue over task_runner and gather results in another queue.
-            # user must setup specific tasks/jobs in task_runner, which (unfortunatelly)
+            # user must setup specific tasks/jobs in task_runner, which (unfortunately)
             # cannot be defined inside a subclass -- only as a standalone function
             self.futures = self.c.map(task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
             self.results = self.c.gather(self.futures)  # Gather results
@@ -731,7 +733,7 @@ class RoboaoArchiver(Archiver):
         """
         assert _collection is not None, 'Must specify collection'
         assert _doc is not None, 'Must specify document'
-        self.db['coll_aux'].insert_one(_doc)
+        self.db[_collection].insert_one(_doc)
 
     @staticmethod
     def empty_db_aux_entry(_date):
@@ -761,162 +763,13 @@ class RoboaoArchiver(Archiver):
                        'last_modified': time_now_utc}
                }
 
-    @staticmethod
-    def empty_db_science_entry():
-        """
-                A dummy database record for a science observation
-            :return:
-            """
-        time_now_utc = utc_now()
-        return {
-            '_id': None,
-            'date_added': time_now_utc,
-            'name': None,
-            'alternative_names': [],
-            'science_program': {
-                'program_id': None,
-                'program_PI': None
-            },
-            'date_utc': None,
-            'telescope': None,
-            'camera': None,
-            'filter': None,
-            'exposure': None,
-            'magnitude': None,
-            'coordinates': {
-                'epoch': None,
-                'radec': None,
-                'radec_str': None,
-                # 'radec_geojson': None,
-                'azel': None
-            },
-            'pipelined': {
-                'automated': {
-                    'status': {
-                        'done': False
-                    },
-                    'preview': {
-                        'force_redo': False,
-                        'done': False,
-                        'retries': 0,
-                        'last_modified': time_now_utc
-                    },
-                    'location': [],
-                    'classified_as': None,
-                    'fits_header': {},
-                    'strehl': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'lock_position': None,
-                        'ratio_percent': None,
-                        'core_arcsec': None,
-                        'halo_arcsec': None,
-                        'fwhm_arcsec': None,
-                        'flag': None,
-                        'last_modified': time_now_utc
-                    },
-                    'pca': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'preview': {
-                            'force_redo': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'location': [],
-                        'lock_position': None,
-                        'contrast_curve': None,
-                        'last_modified': time_now_utc
-                    },
-                    'last_modified': time_now_utc
-                },
-                'faint': {
-                    'status': {
-                        'force_redo': False,
-                        'enqueued': False,
-                        'done': False,
-                        'retries': 0
-                    },
-                    'preview': {
-                        'force_redo': False,
-                        'done': False,
-                        'retries': 0,
-                        'last_modified': time_now_utc
-                    },
-                    'location': [],
-                    'lock_position': None,
-                    'fits_header': {},
-                    'shifts': None,
-                    'strehl': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'lock_position': None,
-                        'ratio_percent': None,
-                        'core_arcsec': None,
-                        'halo_arcsec': None,
-                        'fwhm_arcsec': None,
-                        'flag': None,
-                        'last_modified': time_now_utc
-                    },
-                    'pca': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'preview': {
-                            'force_redo': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'location': [],
-                        'lock_position': None,
-                        'contrast_curve': None,
-                        'last_modified': time_now_utc
-                    },
-                    'last_modified': time_now_utc
-                },
-
-            },
-
-            'seeing': {
-                'median': None,
-                'mean': None,
-                'nearest': None,
-                'last_modified': time_now_utc
-            },
-            'distributed': {
-                'status': False,
-                'location': [],
-                'last_modified': time_now_utc
-            },
-            'raw_data': {
-                'location': [],
-                'data': [],
-                'last_modified': time_now_utc
-            },
-            'comment': None
-        }
-
     def cycle(self):
         """
             Main processing cycle
         :return:
         """
         try:
+            # set up patterns, as these are not going to change
             # check the endings (\Z) and skip _N.fits.bz2:
             # science obs must start with program number (e.g. 24_ or 24.1_)
             pattern_start = r'\d+.?\d??_'
@@ -931,14 +784,6 @@ class RoboaoArchiver(Archiver):
                 # check if DB connection is alive/established
                 connected = self.check_db_connection()
 
-                if False:
-                    # fake tasks:
-                    tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
-                    tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
-
-                    for task in tasks:
-                        arch.q.put(task)
-
                 if connected:
                     # get all dates with raw data for each raw data location
                     dates = self.get_raw_data_descriptors()
@@ -947,7 +792,7 @@ class RoboaoArchiver(Archiver):
                     # iterate over data locations:
                     for location in dates:
                         for date in dates[location]:
-                            # Each individual step where I know something could go wrong is placed inside try-except
+                            # Each individual step where I know something could go wrong is placed inside a try-except
                             # clause. Everything else is captured outside causing the main while loop to terminate.
                             self.logger.debug('Processing {:s} at {:s}'.format(date, location))
                             print(date)
@@ -1043,6 +888,22 @@ class RoboaoArchiver(Archiver):
                                 try:
                                     # look up entry for obs in DB:
                                     select = self.db['coll_obs'].find_one({'_id': obs}, max_time_ms=10000)
+
+                                    roboao_obs = RoboaoObservation(_id=obs, _aux=aux_date,
+                                                                   _program_pi=self.db['program_pi'],
+                                                                   _db_entry=select,
+                                                                   _collection=self.db['coll_obs'])
+
+                                    # try enqueueing. since we're using SetQueue,
+
+                                    if False:
+                                        # fake tasks:
+                                        tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
+                                        tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
+
+                                        for task in tasks:
+                                            self.q.put(task)
+
                                 except RuntimeError as _e:
                                     print(_e)
                                     traceback.print_exc()
@@ -1399,7 +1260,7 @@ def job_bogus(a):
 
 # TODO:
 class Observation(object):
-    def __int__(self, _id=None, _aux=None):
+    def __init__(self, _id=None, _aux=None):
         """
             Initialize Observation object
         :param _id:
@@ -1410,9 +1271,12 @@ class Observation(object):
         # obs unique id:
         self.id = _id
 
-    def parse(self):
+        self.aux = _aux
+
+    def parse(self, **kwargs):
         """
             Parse obs info (e.g. contained in id, or fits header) to be injected into DB
+            Define decision chain for observation pipelining
         :return:
         """
         raise NotImplementedError
@@ -1424,7 +1288,7 @@ class Observation(object):
         """
         raise NotImplementedError
 
-    def update_db_entry(self):
+    def update_db_entry(self, **kwargs):
         """
             Update DB entry
         :return:
@@ -1433,7 +1297,201 @@ class Observation(object):
 
     def pipeline(self):
         """
-            Define decision chain for observation pipelining
+            Execute decision chain
+        :return:
+        """
+        raise NotImplementedError
+
+
+class RoboaoObservation(Observation):
+    def __init__(self, _id=None, _aux=None, _program_pi=None, _db_entry=None, _collection=None):
+        """
+            Initialize Observation object
+        :param _id:
+        :param _aux:
+        :return:
+        """
+        ''' initialize super class '''
+        super(RoboaoObservation, self).__init__(_id=_id, _aux=_aux)
+
+        if _db_entry is None:
+            # db entry does not exist?
+            # parse obs name
+            _obs_info = self.parse(_program_pi)
+            # create "empty" record:
+            self.db_entry = self.init_db_entry()
+            # populate with basic info:
+            for k in _obs_info:
+                self.db_entry[k] = _obs_info[k]
+        else:
+            self.db_entry = _db_entry
+
+        # this will be updated inside self.pipeline()
+        assert _collection is not None, '_collection must be specified'
+        self.collection = _collection
+
+    def parse(self, _program_pi):
+        """
+            Parse obs info (e.g. contained in id, or fits header) to be injected into DB
+            Define decision chain for observation pipelining, i.e. decide what _should_ be done
+            without actually checking what's already done
+
+        :param _program_pi: dict program_num -> PI
+
+        :return:
+        """
+        _obs = self.id
+        # parse name:
+        _tmp = _obs.split('_')
+        # program num. it will be a string in the future
+        _prog_num = str(_tmp[0])
+        # who's pi?
+        if (_program_pi is not None) and (_prog_num in _program_pi.keys()):
+            _prog_pi = _program_pi[_prog_num]
+        else:
+            # play safe if pi's unknown:
+            _prog_pi = ['admin']
+        # stack name together if necessary (if contains underscores):
+        _sou_name = '_'.join(_tmp[1:-5])
+        # code of the filter used:
+        _filt = _tmp[-4:-3][0]
+        # date and time of obs:
+        _date_utc = datetime.datetime.strptime(_tmp[-2] + _tmp[-1], '%Y%m%d%H%M%S.%f')
+        # camera:
+        _camera = _tmp[-5:-4][0]
+        # marker:
+        _marker = _tmp[-3:-2][0]
+
+        return {
+            'science_program': {
+                'program_id': _prog_num,
+                'program_PI': _prog_pi
+            },
+            'name': _sou_name,
+            'filter': _filt,
+            'date_utc': _date_utc,
+            'marker': _marker,
+            'camera': _camera,
+        }
+
+    def init_db_entry(self):
+        """
+                A dummy database record for a science observation
+            :return:
+            """
+        time_now_utc = utc_now()
+        return {
+            '_id': None,
+            'date_added': time_now_utc,
+            'name': None,
+            'alternative_names': [],
+            'science_program': {
+                'program_id': None,
+                'program_PI': None
+            },
+            'date_utc': None,
+            'telescope': None,
+            'camera': None,
+            'filter': None,
+            'exposure': None,
+            'magnitude': None,
+            'coordinates': {
+                'epoch': None,
+                'radec': None,
+                'radec_str': None,
+                # 'radec_geojson': None,
+                'azel': None
+            },
+            'pipelined': {
+                'automated': {
+
+                },
+                'faint': {
+                    'status': {
+                        'force_redo': False,
+                        'enqueued': False,
+                        'done': False,
+                        'retries': 0
+                    },
+                    'preview': {
+                        'force_redo': False,
+                        'done': False,
+                        'retries': 0,
+                        'last_modified': time_now_utc
+                    },
+                    'location': [],
+                    'lock_position': None,
+                    'fits_header': {},
+                    'shifts': None,
+                    'strehl': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'lock_position': None,
+                        'ratio_percent': None,
+                        'core_arcsec': None,
+                        'halo_arcsec': None,
+                        'fwhm_arcsec': None,
+                        'flag': None,
+                        'last_modified': time_now_utc
+                    },
+                    'pca': {
+                        'status': {
+                            'force_redo': False,
+                            'enqueued': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'preview': {
+                            'force_redo': False,
+                            'done': False,
+                            'retries': 0
+                        },
+                        'location': [],
+                        'lock_position': None,
+                        'contrast_curve': None,
+                        'last_modified': time_now_utc
+                    },
+                    'last_modified': time_now_utc
+                },
+
+            },
+
+            'seeing': {
+                'median': None,
+                'mean': None,
+                'nearest': None,
+                'last_modified': time_now_utc
+            },
+            'distributed': {
+                'status': False,
+                'location': [],
+                'last_modified': time_now_utc
+            },
+            'raw_data': {
+                'location': [],
+                'data': [],
+                'last_modified': time_now_utc
+            },
+            'comment': None
+        }
+
+    def update_db_entry(self, upd):
+        """
+            Update DB entry
+        :return:
+        """
+        self.collection.update_ons(
+            {'_id': self.id},
+            upd
+        )
+
+    def pipeline(self):
+        """
+            Construct and execute decision chain
         :return:
         """
         raise NotImplementedError
@@ -1441,7 +1499,124 @@ class Observation(object):
 
 # TODO:
 class Pipeline(object):
-    def __init__(self):
+    def __init__(self, _config):
+        """
+            Pipeline
+        :param _config: dict with configuration
+        """
+        self.config = _config
+        # pipeline name
+        self.name = None
+        # this is what gets injected into DB
+        self.status = OrderedDict()
+
+    def init_status(self):
+        """
+            Initialize status dict
+        :return:
+        """
+        raise NotImplementedError
+
+    def submit_task(self, _task):
+        """
+            Submit pipelining task to distributed queue for execution
+            :param _task: dict of form {'task': 'task_name', 'param_a': param_a_value}
+        :return:
+        """
+        # use json dumps to serialize input dictionary _task. this way, it may be pickled and enqueued
+        self.q.put(json.dumps(_task))
+
+    def run(self):
+        """
+            Run the pipeline
+            # :param aux: auxiliary data including calibration
+        :return:
+        """
+        raise NotImplementedError
+
+
+class RoboaoBrightObjectPipeline(Pipeline):
+    """
+        Robo-AO's Bright Object Pipeline
+    """
+    def __init__(self, _config, _status=None):
+        """
+            Init Robo-AO's Bright Object Pipeline
+            :param _config: dict with configuration
+            :param _status if not None, must have been loaded from DB, otherwise initialized here
+        """
+        ''' initialize super class '''
+        super(RoboaoBrightObjectPipeline, self).__init__(_config=_config)
+
+        # name the pipeline. in DB, this
+        self.name = 'bright_object'
+
+        # initialize status
+        if _status is None:
+            self.init_status()
+        else:
+            self.status = _status
+
+    def init_status(self):
+        time_now_utc = utc_now()
+        self.status = {
+            'status': {
+                'done': False,
+                'enqueued': False,
+                'force_redo': False,
+                'retries': 0,
+                'last_modified': time_now_utc
+            },
+            'preview': {
+                'done': False,
+                'force_redo': False,
+                'retries': 0,
+                'last_modified': time_now_utc
+            },
+            'location': [],
+            'classified_as': None,
+            'fits_header': {},
+            'strehl': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'lock_position': None,
+                'ratio_percent': None,
+                'core_arcsec': None,
+                'halo_arcsec': None,
+                'fwhm_arcsec': None,
+                'flag': None,
+                'last_modified': time_now_utc
+            },
+            'pca': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'preview': {
+                    'force_redo': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'location': [],
+                'lock_position': None,
+                'contrast_curve': None,
+                'last_modified': time_now_utc
+            }
+        }
+
+    def run(self):
+        """
+            Execute pipeline
+        :return:
+        """
+        # TODO:
+        # steps from reduce_data_multithread.py + image_reconstruction.cpp
         pass
 
 
