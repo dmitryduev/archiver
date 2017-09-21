@@ -43,7 +43,7 @@
     }
   },
   "parallel": {
-    "n_workers": 2,
+    "n_workers": 4,
     "threads_per_worker": 1,
 
     "help": {
@@ -58,7 +58,7 @@
     "logging_level": "debug",
     "nap_at_night": true,
     "nap_time_frame": "local",
-    "nap_time_start": "18:00",
+    "nap_time_start": "23:30",
     "nap_time_stop": "04:00",
     "loop_interval": 0.2,
     "help": {

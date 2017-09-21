@@ -3,6 +3,7 @@ import signal
 from collections import OrderedDict
 import pytz
 from distributed import Client, LocalCluster
+import threading
 from queue import Queue
 import time
 import datetime
@@ -235,6 +236,7 @@ class SetQueue(Queue):
         self.queue.add(item)
 
     def _get(self):
+        self.unfinished_tasks = max(self.unfinished_tasks - 1, 0)
         return self.queue.pop()
 
 
@@ -281,8 +283,13 @@ class Archiver(object):
             # now we need to map our queue over task_runner and gather results in another queue.
             # user must setup specific tasks/jobs in task_runner, which (unfortunately)
             # cannot be defined inside a subclass -- only as a standalone function
-            self.futures = self.c.map(task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
+            self.futures = self.c.map(self.task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
             self.results = self.c.gather(self.futures)  # Gather results
+
+            # Pipelining tasks (dict of form {'task': 'task_name', 'param_a': param_a_value}, jsonified)
+            # to distributed queue for execution as self.q.put(task)
+
+            # note: result harvester is defined and started in subclass!
 
             ''' DB connection is handled in subclass '''
             self.db = None
@@ -294,6 +301,20 @@ class Archiver(object):
             print(e)
             traceback.print_exc()
             sys.exit()
+
+    @staticmethod
+    def task_runner(argdict):
+        """
+            Helper function that maps over 'data'
+
+        :param argdict: json-dumped dictionary with (named) parameters for the task.
+                        must contain 'task' key with the task name known to this helper function
+                json.dumps is used to convert the dict to a hashable type - string - so that
+                it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
+                used instead of regular queues to be able to check if a task has been enqueued already
+        :return:
+        """
+        raise NotImplementedError
 
     @staticmethod
     def get_config(_config_file):
@@ -521,6 +542,56 @@ class RoboaoArchiver(Archiver):
         ''' connect to db: '''
         # will exit if this fails
         self.connect_to_db()
+
+        ''' start results harverster '''
+        self.running = True
+        self.h = threading.Thread(target=self.harvester)
+        self.h.start()
+
+    def harvester(self):
+        # TODO: harvest processing results, update DB entries if necessary
+        while self.running:
+            while not self.results.empty():
+                try:
+                    print(self.results.empty())
+                    result = self.results.get()
+                    print(self.results.empty())
+                    print('\n\nGOT SMTHING LOL!!! KTHNKSBAI\n\n', result)
+                finally:
+                    pass
+            time.sleep(1)
+
+    @staticmethod
+    def task_runner(argdict):
+        """
+            Helper function that maps over 'data'
+
+        :param argdict: json-dumped dictionary with (named) parameters for the task.
+                        must contain 'task' key with the task name known to this helper function
+                json.dumps is used to convert the dict to a hashable type - string - so that
+                it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
+                used instead of regular queues to be able to check if a task has been enqueued already
+        :return:
+        """
+        try:
+            # unpack jsonified dict:
+            argdict = json.loads(argdict)
+
+            # assert 'task' in argdict, 'specify which task to run'
+
+            print('running task {:s}'.format(argdict['task']))
+
+            if argdict['task'] == 'BrightObjectPipeline':
+                result = job_bright_object_pipeline(_id=argdict['id'], _config=None)
+
+            else:
+                result = {'status': 'failed', 'error': 'unknown task'}
+
+        except Exception as e:
+            # exception here means bad argdict.
+            result = {'status': 'failed', 'error': str(e)}
+
+        return result
 
     @timeout(seconds_before_timeout=60)
     def connect_to_db(self):
@@ -778,6 +849,14 @@ class RoboaoArchiver(Archiver):
             pattern_fits = r'.fits.bz2\Z'
 
             while True:
+                # # TODO: harvest processing results, update DB entries if necessary
+                # while not self.results.empty():
+                #     try:
+                #         result = self.results.get()
+                #         print(result)
+                #     finally:
+                #         pass
+
                 # check if a new log file needs to be started
                 self.check_logging()
 
@@ -785,6 +864,7 @@ class RoboaoArchiver(Archiver):
                 connected = self.check_db_connection()
 
                 if connected:
+
                     # get all dates with raw data for each raw data location
                     dates = self.get_raw_data_descriptors()
                     print(dates)
@@ -893,16 +973,23 @@ class RoboaoArchiver(Archiver):
                                                                    _program_pi=self.db['program_pi'],
                                                                    _db_entry=select,
                                                                    _collection=self.db['coll_obs'])
-
-                                    # try enqueueing. since we're using SetQueue,
-
-                                    if False:
-                                        # fake tasks:
-                                        tasks = [json.dumps({'task': 'test', 'a': aa}) for aa in range(20)]
-                                        tasks += [json.dumps({'task': 'bogus', 'a': aa}) for aa in range(20, 50)]
-
-                                        for task in tasks:
-                                            self.q.put(task)
+                                    # TODO: check raws
+                                    roboao_obs.check_raws()
+                                    # TODO: we'll be adding one task per observation at a time
+                                    pipe_task = roboao_obs.get_task()
+                                    print(pipe_task)
+                                    if pipe_task is None:
+                                        # TODO: check distributed
+                                        roboao_obs.check_distributed()
+                                    else:
+                                        # try enqueueing. SetQueue takes care of possible duplicates
+                                        # use json dumps to serialize input dictionary _task. this way,
+                                        # it may be pickled and enqueued
+                                        print(datetime.datetime.now(), pipe_task)
+                                        # print(self.q.unfinished_tasks)
+                                        self.q.put(json.dumps(pipe_task))
+                                        time.sleep(0.5)
+                                        self.q.put(json.dumps(pipe_task))
 
                                 except RuntimeError as _e:
                                     print(_e)
@@ -911,10 +998,12 @@ class RoboaoArchiver(Archiver):
                                     self.logger.error('Failed to look up entry for {:s} in DB.'.format(obs))
                                     continue
 
+                print(self.c.scheduler.released())
                 self.sleep()
 
         except KeyboardInterrupt:
             # user ctrl-c'ed
+            self.running = False
             self.logger.error('User exited the archiver.')
             # try disconnecting from the database (if connected) and closing the cluster
             try:
@@ -931,6 +1020,7 @@ class RoboaoArchiver(Archiver):
             traceback.print_exc()
             self.logger.error(e)
             self.logger.error('Unknown error, exiting. Please check the logs.')
+            self.running = False
             try:
                 self.logger.info('Shutting down.')
                 self.disconnect_from_db()
@@ -1207,55 +1297,13 @@ class RoboaoArchiver(Archiver):
                 raise RuntimeError('No enough calibration files for {:s}'.format(_date))
 
 
-def task_runner(argdict):
-    """
-        Helper function that maps over 'data'
-
-    :param argdict: json-dumped dictionary with (named) parameters for the task.
-                    must contain 'task' key with the task name known to this helper function
-            json.dumps is used to convert the dict to a hashable type - string - so that
-            it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
-            used instead of regular queues to be able to check if a task has been enqueued already
-    :return:
-    """
+def job_bright_object_pipeline(_id=None, _config=None):
     try:
-        # unpack jsonified dict:
-        argdict = json.loads(argdict)
-
-        # assert 'task' in argdict, 'specify which task to run'
-
-        print('running task {:s}'.format(argdict['task']))
-
-        if argdict['task'] == 'test':
-            out = job_test(argdict['a'])
-            print(out)
-
-        elif argdict['task'] == 'bogus':
-            out = job_bogus(argdict['a'])
-            print(out)
-
-        return True
-
-    except Exception as e:
-        print('task failed saying \"{:s}\"'.format(str(e)))
-        # traceback.print_exc()
-        return True
-
-
-def job_test(a):
-    for _i in range(200):
-        for _j in range(100):
-            for k in range(500):
-                a += 3 ** 2
-    return a
-
-
-def job_bogus(a):
-    for _i in range(200):
-        for _j in range(100):
-            for k in range(500):
-                a += 4 ** 2
-    return a
+        time.sleep(3)
+        return {'_id': _id, 'job': 'bright_object_pipeline', 'status': 'success',
+                'bogus': str(datetime.datetime.now())}
+    except Exception as _e:
+        return {'_id': _id, 'job': 'bright_object_pipeline', 'status': 'failed', 'error': _e}
 
 
 # TODO:
@@ -1329,6 +1377,24 @@ class RoboaoObservation(Observation):
         # this will be updated inside self.pipeline()
         assert _collection is not None, '_collection must be specified'
         self.collection = _collection
+
+    def get_task(self):
+        _task = None
+
+        # TODO: BOP?
+        _task = {'task': 'BrightObjectPipeline', 'id': self.id, 'time_stamp': str(datetime.datetime.now())}
+
+        # TODO: FOP?
+
+        # TODO: EOP?
+
+        return _task
+
+    def check_raws(self):
+        pass
+
+    def check_distributed(self):
+        pass
 
     def parse(self, _program_pi):
         """
@@ -1517,15 +1583,6 @@ class Pipeline(object):
         """
         raise NotImplementedError
 
-    def submit_task(self, _task):
-        """
-            Submit pipelining task to distributed queue for execution
-            :param _task: dict of form {'task': 'task_name', 'param_a': param_a_value}
-        :return:
-        """
-        # use json dumps to serialize input dictionary _task. this way, it may be pickled and enqueued
-        self.q.put(json.dumps(_task))
-
     def run(self):
         """
             Run the pipeline
@@ -1617,7 +1674,7 @@ class RoboaoBrightObjectPipeline(Pipeline):
         """
         # TODO:
         # steps from reduce_data_multithread.py + image_reconstruction.cpp
-        pass
+        return {'status': 'fail'}
 
 
 if __name__ == '__main__':
