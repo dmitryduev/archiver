@@ -7,7 +7,7 @@
     }
   },
   "path": {
-    "path_logs": "logs",
+    "path_logs": "/Users/dmitryduev/_caltech/python/archiver/logs/",
     "path_raw": ["/Users/dmitryduev/_caltech/roboao/_nas_data/VIC_data/"],
     "path_archive": "/Users/dmitryduev/_caltech/roboao/_archive/",
     "path_tmp": "/Users/dmitryduev/_caltech/roboao/_tmp/",
@@ -70,7 +70,7 @@
       "nap_time_frame": "'local' or 'UTC'?",
       "nap_time_start": "HH:MM in 24-hour format",
       "nap_time_stop": "HH:MM in 24-hour format. could be next morning",
-      "loop_interval": "interval [minutes] to rerun the archiver"
+      "loop_interval": "interval [minutes] to rerun the archiver if not nap time"
     }
   },
   "pipeline": {

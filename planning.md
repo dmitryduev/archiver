@@ -25,12 +25,14 @@ Note that our queue "intelligently" selects targets based on a number of criteri
 so there is no predefined order in which the targets will get observed.
 
 - You will be able to access your processed data at Robo-AO's 
-[archive](roboao.caltech.edu/archive). 
+[archive](http://roboao.caltech.edu/archive). 
 Contact Dima Duev for login/password. Please refer to the paper for a description 
 of the pipelines that we run on the raw data.
 
 
 ### Example target list
+```
 name _RAJ2000 _DEJ2000 epoch mag exposure_time_1 filter_code_1 exposure_time_2 filter_code_2 exposure_time_3 filter_code_3 comment 
 TargetName1 12:40:40.79 33:36:17.00 2000 11.6 60 FILTER_LONGPASS_600 60 FILTER_SLOAN_I 60 FILTER_SLOAN_Z "Comment_1_without_blank_spaces"
 TargetName2 19:41:09.97 33:55:32.50 2000 10.7 60 FILTER_LONGPASS_600 60 FILTER_SLOAN_I 60 FILTER_SLOAN_Z "Comment_2_without_blank_spaces"
+```

@@ -543,23 +543,29 @@ class RoboaoArchiver(Archiver):
         # will exit if this fails
         self.connect_to_db()
 
-        ''' start results harverster '''
+        ''' start results harvester '''
         self.running = True
         self.h = threading.Thread(target=self.harvester)
         self.h.start()
 
     def harvester(self):
-        # TODO: harvest processing results, update DB entries if necessary
+        """
+            Harvest processing results from dask.distributed results queue, update DB entries if necessary
+        :return:
+        """
+        # make sure the archiver is running. this is to protect from frozen thread on (user) exit
         while self.running:
+            # get new results from queue one by one
             while not self.results.empty():
                 try:
-                    print(self.results.empty())
                     result = self.results.get()
-                    print(self.results.empty())
-                    print('\n\nGOT SMTHING LOL!!! KTHNKSBAI\n\n', result)
-                finally:
-                    pass
-            time.sleep(1)
+                    self.logger.info('Task finished saying: ', result)
+                    print('Task finished saying:\n', result)
+                    # TODO: update DB entry
+                except Exception as _e:
+                    self.logger.error(_e)
+            # don't need to check that too often
+            time.sleep(5)
 
     @staticmethod
     def task_runner(argdict):
@@ -804,7 +810,25 @@ class RoboaoArchiver(Archiver):
         """
         assert _collection is not None, 'Must specify collection'
         assert _doc is not None, 'Must specify document'
-        self.db[_collection].insert_one(_doc)
+        try:
+            self.db[_collection].insert_one(_doc)
+        except Exception as e:
+            self.logger.error('Error inserting {:s} into {:s}'.format(_doc, _collection))
+            self.logger.error(e)
+
+    @timeout(seconds_before_timeout=30)
+    def update_db_entry(self, _collection=None, upd=None):
+        """
+            Update DB entry
+        :return:
+        """
+        assert _collection is not None, 'Must specify collection'
+        assert upd is not None, 'Must specify update'
+        try:
+            self.db[_collection].update_one(upd[0], upd[1])
+        except Exception as e:
+            self.logger.error('Error executing {:s} for {:s}'.format(upd, _collection))
+            self.logger.error(e)
 
     @staticmethod
     def empty_db_aux_entry(_date):
@@ -849,13 +873,6 @@ class RoboaoArchiver(Archiver):
             pattern_fits = r'.fits.bz2\Z'
 
             while True:
-                # # TODO: harvest processing results, update DB entries if necessary
-                # while not self.results.empty():
-                #     try:
-                #         result = self.results.get()
-                #         print(result)
-                #     finally:
-                #         pass
 
                 # check if a new log file needs to be started
                 self.check_logging()
@@ -971,24 +988,32 @@ class RoboaoArchiver(Archiver):
 
                                     roboao_obs = RoboaoObservation(_id=obs, _aux=aux_date,
                                                                    _program_pi=self.db['program_pi'],
-                                                                   _db_entry=select,
-                                                                   _collection=self.db['coll_obs'])
-                                    # TODO: check raws
-                                    roboao_obs.check_raws()
+                                                                   _db_entry=select)
+                                    # check raws
+                                    s = roboao_obs.check_raws(_location=location, _date=date,
+                                                              _date_raw_data=date_raw_data)
+                                    # changes detected?
+                                    if s['status'] == 'ok' and s['message'] is not None:
+                                        self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('Corrected raw_data entry for {:s}'.format(obs))
+                                    # something failed?
+                                    elif s['status'] == 'error':
+                                        self.logger.error('{:s}, checking raw files failed: {:s}'.format(obs,
+                                                                                                         s['message']))
+                                        # proceed to next obs:
+                                        continue
+
                                     # TODO: we'll be adding one task per observation at a time
                                     pipe_task = roboao_obs.get_task()
                                     print(pipe_task)
                                     if pipe_task is None:
-                                        # TODO: check distributed
+                                        # TODO: nothing to be done? check distributed
                                         roboao_obs.check_distributed()
                                     else:
                                         # try enqueueing. SetQueue takes care of possible duplicates
                                         # use json dumps to serialize input dictionary _task. this way,
                                         # it may be pickled and enqueued
-                                        print(datetime.datetime.now(), pipe_task)
                                         # print(self.q.unfinished_tasks)
-                                        self.q.put(json.dumps(pipe_task))
-                                        time.sleep(0.5)
                                         self.q.put(json.dumps(pipe_task))
 
                                 except RuntimeError as _e:
@@ -998,7 +1023,8 @@ class RoboaoArchiver(Archiver):
                                     self.logger.error('Failed to look up entry for {:s} in DB.'.format(obs))
                                     continue
 
-                print(self.c.scheduler.released())
+                # released tasks live here:
+                # print(self.c.scheduler.released())
                 self.sleep()
 
         except KeyboardInterrupt:
@@ -1352,7 +1378,7 @@ class Observation(object):
 
 
 class RoboaoObservation(Observation):
-    def __init__(self, _id=None, _aux=None, _program_pi=None, _db_entry=None, _collection=None):
+    def __init__(self, _id=None, _aux=None, _program_pi=None, _db_entry=None):
         """
             Initialize Observation object
         :param _id:
@@ -1362,6 +1388,7 @@ class RoboaoObservation(Observation):
         ''' initialize super class '''
         super(RoboaoObservation, self).__init__(_id=_id, _aux=_aux)
 
+        # current DB entry
         if _db_entry is None:
             # db entry does not exist?
             # parse obs name
@@ -1374,9 +1401,10 @@ class RoboaoObservation(Observation):
         else:
             self.db_entry = _db_entry
 
-        # this will be updated inside self.pipeline()
-        assert _collection is not None, '_collection must be specified'
-        self.collection = _collection
+        # print(self.db_entry)
+        # pass on the config
+        # assert _config is not None, 'must pass config to RoboaoObservation ' + _id
+        # self.config = _config
 
     def get_task(self):
         _task = None
@@ -1390,8 +1418,33 @@ class RoboaoObservation(Observation):
 
         return _task
 
-    def check_raws(self):
-        pass
+    def check_raws(self, _location, _date, _date_raw_data):
+        try:
+            # raw file names
+            _raws = [_s for _s in _date_raw_data if re.match(re.escape(self.id), _s) is not None]
+            # time tags. use the 'freshest' time tag for 'last_modified'
+            time_tags = [datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_location, _date, _s)).st_mtime)
+                         for _s in _raws]
+            time_tag = max(time_tags)
+
+            # changed? the archiver will have to update database entry then:
+            if abs((time_tag - self.db_entry['raw_data']['last_modified']).total_seconds()) > 1.0:
+                # DB updates are handled by the main archiver process
+                # we'll provide it with proper query to feed into pymongo's update_one()
+                return {'status': 'ok', 'message': 'raw files changed',
+                        'db_record_update': ({'_id': self.id},
+                                             {'$set': {
+                                                    'raw_data.data': sorted(_raws),
+                                                    'raw_data.last_modified': time_tag
+                                             }}
+                                             )
+                        }
+            else:
+                return {'status': 'ok', 'message': None}
+
+        except Exception as _e:
+            traceback.print_exc()
+            return {'status': 'error', 'message': _e}
 
     def check_distributed(self):
         pass
@@ -1544,16 +1597,6 @@ class RoboaoObservation(Observation):
             },
             'comment': None
         }
-
-    def update_db_entry(self, upd):
-        """
-            Update DB entry
-        :return:
-        """
-        self.collection.update_ons(
-            {'_id': self.id},
-            upd
-        )
 
     def pipeline(self):
         """
