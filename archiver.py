@@ -988,7 +988,8 @@ class RoboaoArchiver(Archiver):
 
                                     roboao_obs = RoboaoObservation(_id=obs, _aux=aux_date,
                                                                    _program_pi=self.db['program_pi'],
-                                                                   _db_entry=select)
+                                                                   _db_entry=select,
+                                                                   _config=self.config)
                                     # check raws
                                     s = roboao_obs.check_raws(_location=location, _date=date,
                                                               _date_raw_data=date_raw_data)
@@ -1004,10 +1005,11 @@ class RoboaoArchiver(Archiver):
                                         continue
 
                                     # TODO: we'll be adding one task per observation at a time
+                                    # self.task_runner will take care of executing the task
                                     pipe_task = roboao_obs.get_task()
                                     print(pipe_task)
                                     if pipe_task is None:
-                                        # TODO: nothing to be done? check distributed
+                                        # TODO: nothing to be done? check distribution status
                                         roboao_obs.check_distributed()
                                     else:
                                         # try enqueueing. SetQueue takes care of possible duplicates
@@ -1362,9 +1364,9 @@ class Observation(object):
         """
         raise NotImplementedError
 
-    def update_db_entry(self, **kwargs):
+    def get_task(self, **kwargs):
         """
-            Update DB entry
+            Construct decision chain
         :return:
         """
         raise NotImplementedError
@@ -1378,7 +1380,7 @@ class Observation(object):
 
 
 class RoboaoObservation(Observation):
-    def __init__(self, _id=None, _aux=None, _program_pi=None, _db_entry=None):
+    def __init__(self, _id=None, _aux=None, _program_pi=None, _db_entry=None, _config=None):
         """
             Initialize Observation object
         :param _id:
@@ -1403,14 +1405,26 @@ class RoboaoObservation(Observation):
 
         # print(self.db_entry)
         # pass on the config
-        # assert _config is not None, 'must pass config to RoboaoObservation ' + _id
-        # self.config = _config
+        assert _config is not None, 'must pass config to RoboaoObservation ' + _id
+        self.config = _config
 
     def get_task(self):
+        """
+            Figure out what needs to be done with the observation.
+            Here is where the processing decision chain is defined
+        :return:
+        """
         _task = None
 
         # TODO: BOP?
-        _task = {'task': 'BrightObjectPipeline', 'id': self.id, 'time_stamp': str(datetime.datetime.now())}
+        ''' Bright object pipeline '''
+        go = self.db_entry['pipelined']['automated']['status']['force_redo'] or \
+                ((not self.db_entry['pipelined']['automated']['status']['done']) and
+                 self.db_entry['pipelined']['automated']['status']['retries'] <
+                 self.config['max_pipelining_retries'])
+
+        if go:
+            _task = {'task': 'BrightObjectPipeline', 'id': self.id, 'time_stamp': str(datetime.datetime.now())}
 
         # TODO: FOP?
 
