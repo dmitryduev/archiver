@@ -587,8 +587,8 @@ class RoboaoArchiver(Archiver):
 
             print('running task {:s}'.format(argdict['task']))
 
-            if argdict['task'] == 'BrightObjectPipeline':
-                result = job_bright_object_pipeline(_id=argdict['id'], _config=None)
+            if argdict['task'] == 'bright_star_pipeline':
+                result = job_bright_star_pipeline(_id=argdict['id'], _config=None)
 
             else:
                 result = {'status': 'failed', 'error': 'unknown task'}
@@ -904,7 +904,7 @@ class RoboaoArchiver(Archiver):
                                 else:
                                     self.logger.debug('Found {:d} zipped fits-files for {:s}'.format(len(date_raw_data),
                                                                                                      date))
-                            except RuntimeError as _e:
+                            except Exception as _e:
                                 print(_e)
                                 traceback.print_exc()
                                 self.logger.error(_e)
@@ -919,7 +919,7 @@ class RoboaoArchiver(Archiver):
                                 if select is None:
                                     # insert empty entry for date into aux database:
                                     self.db_insert(_collection='coll_aux', _doc=self.empty_db_aux_entry(date))
-                            except RuntimeError as _e:
+                            except Exception as _e:
                                 print(_e)
                                 traceback.print_exc()
                                 self.logger.error(_e)
@@ -944,7 +944,7 @@ class RoboaoArchiver(Archiver):
                             # look up aux entry for date in the database:
                             try:
                                 aux_date = self.db['coll_aux'].find_one({'_id': date}, max_time_ms=5000)
-                            except RuntimeError as _e:
+                            except Exception as _e:
                                 print(_e)
                                 traceback.print_exc()
                                 self.logger.error(_e)
@@ -972,7 +972,7 @@ class RoboaoArchiver(Archiver):
                                     self.logger.debug(
                                         'Found {:d} zipped science fits-files for {:s}'.format(len(date_raw_data),
                                                                                                date))
-                            except RuntimeError as _e:
+                            except Exception as _e:
                                 print(_e)
                                 traceback.print_exc()
                                 self.logger.error(_e)
@@ -986,10 +986,26 @@ class RoboaoArchiver(Archiver):
                                     # look up entry for obs in DB:
                                     select = self.db['coll_obs'].find_one({'_id': obs}, max_time_ms=10000)
 
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error('Failed to look up entry for {:s} in DB.'.format(obs))
+                                    self.logger.error(_e)
+                                    continue
+
+                                try:
                                     roboao_obs = RoboaoObservation(_id=obs, _aux=aux_date,
                                                                    _program_pi=self.db['program_pi'],
                                                                    _db_entry=select,
                                                                    _config=self.config)
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error('Failed to set up obs object for {:s}.'.format(obs))
+                                    self.logger.error(_e)
+                                    continue
+
+                                try:
                                     # check raws
                                     s = roboao_obs.check_raws(_location=location, _date=date,
                                                               _date_raw_data=date_raw_data)
@@ -1003,8 +1019,16 @@ class RoboaoArchiver(Archiver):
                                                                                                          s['message']))
                                         # proceed to next obs:
                                         continue
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Raw files check failed for {:s}.'.format(obs))
+                                    continue
 
-                                    # TODO: we'll be adding one task per observation at a time
+                                try:
+                                    # we'll be adding one task per observation at a time to avoid
+                                    # complicating things.
                                     # self.task_runner will take care of executing the task
                                     pipe_task = roboao_obs.get_task()
                                     print(pipe_task)
@@ -1017,12 +1041,11 @@ class RoboaoArchiver(Archiver):
                                         # it may be pickled and enqueued
                                         # print(self.q.unfinished_tasks)
                                         self.q.put(json.dumps(pipe_task))
-
-                                except RuntimeError as _e:
+                                except Exception as _e:
                                     print(_e)
                                     traceback.print_exc()
                                     self.logger.error(_e)
-                                    self.logger.error('Failed to look up entry for {:s} in DB.'.format(obs))
+                                    self.logger.error('Failed to get/enqueue a task for {:s}.'.format(obs))
                                     continue
 
                 # released tasks live here:
@@ -1325,13 +1348,13 @@ class RoboaoArchiver(Archiver):
                 raise RuntimeError('No enough calibration files for {:s}'.format(_date))
 
 
-def job_bright_object_pipeline(_id=None, _config=None):
+def job_bright_star_pipeline(_id=None, _config=None):
     try:
         time.sleep(3)
-        return {'_id': _id, 'job': 'bright_object_pipeline', 'status': 'success',
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'status': 'success',
                 'bogus': str(datetime.datetime.now())}
     except Exception as _e:
-        return {'_id': _id, 'job': 'bright_object_pipeline', 'status': 'failed', 'error': _e}
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'status': 'failed', 'error': _e}
 
 
 # TODO:
@@ -1416,17 +1439,33 @@ class RoboaoObservation(Observation):
         """
         _task = None
 
-        # TODO: BOP?
-        ''' Bright object pipeline '''
-        go = self.db_entry['pipelined']['automated']['status']['force_redo'] or \
-                ((not self.db_entry['pipelined']['automated']['status']['done']) and
-                 self.db_entry['pipelined']['automated']['status']['retries'] <
-                 self.config['max_pipelining_retries'])
+        # TODO: BSP?
+        ''' Bright star pipeline '''
+        pipe = RoboaoBrightStarPipeline(_config=self.config, _db_entry=self.db_entry)
+        # check conditions necessary to run (defined in config.json):
+        go = pipe.check_necessary_conditions()
+        print(go)
+
+        # TODO: MOVE THIS TO RoboaoBrightStarPipeline.check_conditions(part='BSP')
+        # then: RoboaoBrightStarPipeline.check_conditions(part='Strehl')
+        # and   RoboaoBrightStarPipeline.check_conditions(part='PCA')
+
+        # force redo requested?
+        _force_redo = self.db_entry['pipelined'][pipe.name]['status']['force_redo']
+        # pipeline done?
+        _done = self.db_entry['pipelined'][pipe.name]['status']['done']
+        # how many times tried?
+        _num_tries = self.db_entry['pipelined'][pipe.name]['status']['retries']
+
+        go = go and (_force_redo or ((not _done) and (_num_tries <= self.config['max_pipelining_retries'])))
 
         if go:
-            _task = {'task': 'BrightObjectPipeline', 'id': self.id, 'time_stamp': str(datetime.datetime.now())}
+            _task = {'task': 'bright_star_pipeline', 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+            return _task
 
-        # TODO: FOP?
+
+
+        # TODO: FSP?
 
         # TODO: EOP?
 
@@ -1622,16 +1661,25 @@ class RoboaoObservation(Observation):
 
 # TODO:
 class Pipeline(object):
-    def __init__(self, _config):
+    def __init__(self, _config, _db_entry):
         """
             Pipeline
         :param _config: dict with configuration
+        :param _db_entry: observation DB entry
         """
         self.config = _config
+        self.db_entry = _db_entry
         # pipeline name
-        self.name = None
+        # self.name = None
         # this is what gets injected into DB
-        self.status = OrderedDict()
+        # self.status = OrderedDict()
+
+    def check_necessary_conditions(self):
+        """
+            Check if should be run on an obs
+        :return:
+        """
+        raise NotImplementedError
 
     def init_status(self):
         """
@@ -1649,31 +1697,51 @@ class Pipeline(object):
         raise NotImplementedError
 
 
-class RoboaoBrightObjectPipeline(Pipeline):
+class RoboaoBrightStarPipeline(Pipeline):
     """
-        Robo-AO's Bright Object Pipeline
+        Robo-AO's Bright Star Pipeline
     """
-    def __init__(self, _config, _status=None):
+    def __init__(self, _config, _db_entry):
         """
-            Init Robo-AO's Bright Object Pipeline
+            Init Robo-AO's Bright Star Pipeline
             :param _config: dict with configuration
-            :param _status if not None, must have been loaded from DB, otherwise initialized here
+            :param _db_entry: observation DB entry
         """
         ''' initialize super class '''
-        super(RoboaoBrightObjectPipeline, self).__init__(_config=_config)
+        super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
 
         # name the pipeline. in DB, this
-        self.name = 'bright_object'
+        self.name = 'bright_star'
 
         # initialize status
-        if _status is None:
-            self.init_status()
-        else:
-            self.status = _status
+        if self.name not in self.db_entry['pipelined']:
+            self.db_entry['pipelined'][self.name] = self.init_status()
+
+    def check_necessary_conditions(self):
+        """
+            Check if should be run on an obs (if necessary conditions are met)
+            :param _db_entry: observation DB entry
+        :return:
+        """
+        go = True
+
+        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
+            if field_name != 'help':
+                # build proper dict reference expression
+                keys = field_name.split('.')
+                expr = 'self.db_entry'
+                for key in keys:
+                    expr += "['{:s}']".format(key)
+                # get condition
+                condition = eval(expr + ' ' + field_condition)
+                # eval condition
+                go = go and condition
+
+        return go
 
     def init_status(self):
         time_now_utc = utc_now()
-        self.status = {
+        return {
             'status': {
                 'done': False,
                 'enqueued': False,
