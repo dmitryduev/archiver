@@ -18,6 +18,7 @@ import json
 import logging
 import collections
 import pymongo
+from bson import json_util
 import re
 from astropy.io import fits
 import pyprind
@@ -302,6 +303,9 @@ class Archiver(object):
             traceback.print_exc()
             sys.exit()
 
+    def harvester(self):
+        raise NotImplementedError
+
     @staticmethod
     def task_runner(argdict):
         """
@@ -543,7 +547,7 @@ class RoboaoArchiver(Archiver):
         # will exit if this fails
         self.connect_to_db()
 
-        ''' start results harvester '''
+        ''' start results harvester in separate thread '''
         self.running = True
         self.h = threading.Thread(target=self.harvester)
         self.h.start()
@@ -562,6 +566,8 @@ class RoboaoArchiver(Archiver):
                     self.logger.info('Task finished saying: ', result)
                     print('Task finished saying:\n', result)
                     # TODO: update DB entry
+                    if 'db_record_update' in result:
+                        self.update_db_entry(result['db_record_update'])
                 except Exception as _e:
                     self.logger.error(_e)
             # don't need to check that too often
@@ -581,21 +587,39 @@ class RoboaoArchiver(Archiver):
         """
         try:
             # unpack jsonified dict:
-            argdict = json.loads(argdict)
+            argdict = json.loads(argdict, object_hook=json_util.object_hook)
 
-            # assert 'task' in argdict, 'specify which task to run'
-
+            assert 'task' in argdict, 'specify which task to run'
             print('running task {:s}'.format(argdict['task']))
 
             if argdict['task'] == 'bright_star_pipeline':
-                result = job_bright_star_pipeline(_id=argdict['id'], _config=None)
+                result = job_bright_star_pipeline(_id=argdict['id'], _config=argdict['config'],
+                                                  _db_entry=argdict['db_entry'])
+
+            elif argdict['task'] == 'bright_star_pipeline:strehl':
+                result = {'status': 'error', 'message': 'not implemented'}
+
+            elif argdict['task'] == 'bright_star_pipeline:pca':
+                result = {'status': 'error', 'message': 'not implemented'}
+
+            elif argdict['task'] == 'faint_star_pipeline':
+                result = {'status': 'error', 'message': 'not implemented'}
+
+            elif argdict['task'] == 'faint_star_pipeline:strehl':
+                result = {'status': 'error', 'message': 'not implemented'}
+
+            elif argdict['task'] == 'faint_star_pipeline:pca':
+                result = {'status': 'error', 'message': 'not implemented'}
+
+            elif argdict['task'] == 'extended_object_pipeline':
+                result = {'status': 'error', 'message': 'not implemented'}
 
             else:
-                result = {'status': 'failed', 'error': 'unknown task'}
+                result = {'status': 'error', 'message': 'unknown task'}
 
-        except Exception as e:
+        except Exception as _e:
             # exception here means bad argdict.
-            result = {'status': 'failed', 'error': str(e)}
+            result = {'status': 'error', 'message': str(_e)}
 
         return result
 
@@ -1013,9 +1037,31 @@ class RoboaoArchiver(Archiver):
                                     if s['status'] == 'ok' and s['message'] is not None:
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected raw_data entry for {:s}'.format(obs))
+                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
                                     # something failed?
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking raw files failed: {:s}'.format(obs,
+                                                                                                         s['message']))
+                                        # proceed to next obs:
+                                        continue
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Raw files check failed for {:s}.'.format(obs))
+                                    continue
+
+                                try:
+                                    # check that DB entry reflects reality
+                                    s = roboao_obs.check_db_entry()
+                                    # discrepancy detected?
+                                    if s['status'] == 'ok' and s['message'] is not None:
+                                        self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('Corrected DB entry for {:s}'.format(obs))
+                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
+                                    # something failed?
+                                    elif s['status'] == 'error':
+                                        self.logger.error('{:s}, checking DB entry failed: {:s}'.format(obs,
                                                                                                          s['message']))
                                         # proceed to next obs:
                                         continue
@@ -1031,16 +1077,12 @@ class RoboaoArchiver(Archiver):
                                     # complicating things.
                                     # self.task_runner will take care of executing the task
                                     pipe_task = roboao_obs.get_task()
-                                    print(pipe_task)
-                                    if pipe_task is None:
-                                        # TODO: nothing to be done? check distribution status
-                                        roboao_obs.check_distributed()
-                                    else:
+                                    print({'id': pipe_task['id'], 'task': pipe_task['task']})
+                                    if pipe_task is not None:
                                         # try enqueueing. SetQueue takes care of possible duplicates
                                         # use json dumps to serialize input dictionary _task. this way,
                                         # it may be pickled and enqueued
-                                        # print(self.q.unfinished_tasks)
-                                        self.q.put(json.dumps(pipe_task))
+                                        self.q.put(json.dumps(pipe_task, default=json_util.default))
                                 except Exception as _e:
                                     print(_e)
                                     traceback.print_exc()
@@ -1048,6 +1090,28 @@ class RoboaoArchiver(Archiver):
                                     self.logger.error('Failed to get/enqueue a task for {:s}.'.format(obs))
                                     continue
 
+                                try:
+                                    # check distribution status
+                                    s = roboao_obs.check_distributed()
+                                    if s['status'] == 'ok' and s['message'] is not None:
+                                        self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('updated distribution status for {:s}'.format(obs))
+                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
+                                    # something failed?
+                                    elif s['status'] == 'error':
+                                        self.logger.error('{:s}, checking distribution status failed: {:s}'.format(obs,
+                                                                                                         s['message']))
+                                        # proceed to next obs:
+                                        continue
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Raw files check failed for {:s}.'.format(obs))
+                                    continue
+
+                # unfinished tasks live here:
+                # print(self.q.unfinished_tasks)
                 # released tasks live here:
                 # print(self.c.scheduler.released())
                 self.sleep()
@@ -1348,17 +1412,10 @@ class RoboaoArchiver(Archiver):
                 raise RuntimeError('No enough calibration files for {:s}'.format(_date))
 
 
-def job_bright_star_pipeline(_id=None, _config=None):
-    try:
-        time.sleep(3)
-        return {'_id': _id, 'job': 'bright_star_pipeline', 'status': 'success',
-                'bogus': str(datetime.datetime.now())}
-    except Exception as _e:
-        return {'_id': _id, 'job': 'bright_star_pipeline', 'status': 'failed', 'error': _e}
-
-
-# TODO:
 class Observation(object):
+    """
+        This is mainly to show the tentative structure for future use cases
+    """
     def __init__(self, _id=None, _aux=None):
         """
             Initialize Observation object
@@ -1387,16 +1444,16 @@ class Observation(object):
         """
         raise NotImplementedError
 
-    def get_task(self, **kwargs):
+    def check_db_entry(self):
         """
-            Construct decision chain
+            Check if DB entry reflects reality
         :return:
         """
         raise NotImplementedError
 
-    def pipeline(self):
+    def get_task(self, **kwargs):
         """
-            Execute decision chain
+            Construct decision chain
         :return:
         """
         raise NotImplementedError
@@ -1431,6 +1488,53 @@ class RoboaoObservation(Observation):
         assert _config is not None, 'must pass config to RoboaoObservation ' + _id
         self.config = _config
 
+    def check_db_entry(self):
+        """
+            Check if DB entry reflects reality
+            Might add more checks in the future. Currently only checks pipelining status
+        :return:
+        """
+        try:
+            _date = self.db_entry['date_utc'].strftime('%Y%m%d')
+
+            _pipe_names = ['bright_star', 'faint_star']
+
+            for _pipe_name in _pipe_names:
+
+                # pipe self
+                _path_pipe = os.path.join(self.config['path']['path_archive'], _date, self.id, _pipe_name)
+
+                # path exists? if yes -- processing must have occurred
+                if os.path.exists(_path_pipe):
+                    # check folder modified date:
+                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(_path_pipe).st_mtime)
+                    # time_tag = mdate_walk(_path_pipe)
+                    # bad time tag? force redo!
+                    if abs((time_tag - self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
+                        return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
+                                'db_record_update': ({'_id': self.id},
+                                                     {'$unset': {
+                                                         'pipelined.{:s}'.format(_pipe_name): 1
+                                                     }}
+                                                     )
+                                }
+                # path does not exist? make sure it's not present in DB entry and/or not marked 'done'
+                elif (_pipe_name in self.db_entry['pipelined']) and \
+                        self.db_entry['pipelined'][_pipe_name]['status']['done']:
+                    return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
+                            'db_record_update': ({'_id': self.id},
+                                                 {'$unset': {
+                                                     'pipelined.{:s}'.format(_pipe_name): 1
+                                                 }}
+                                                 )
+                            }
+
+            return {'status': 'ok', 'message': None}
+
+        except Exception as _e:
+            traceback.print_exc()
+            return {'status': 'error', 'message': str(_e)}
+
     def get_task(self):
         """
             Figure out what needs to be done with the observation.
@@ -1446,35 +1550,57 @@ class RoboaoObservation(Observation):
         go = pipe.check_necessary_conditions()
         print(go)
 
-        # TODO: MOVE THIS TO RoboaoBrightStarPipeline.check_conditions(part='BSP')
-        # then: RoboaoBrightStarPipeline.check_conditions(part='Strehl')
-        # and   RoboaoBrightStarPipeline.check_conditions(part='PCA')
-
-        # force redo requested?
-        _force_redo = self.db_entry['pipelined'][pipe.name]['status']['force_redo']
-        # pipeline done?
-        _done = self.db_entry['pipelined'][pipe.name]['status']['done']
-        # how many times tried?
-        _num_tries = self.db_entry['pipelined'][pipe.name]['status']['retries']
-
-        go = go and (_force_redo or ((not _done) and (_num_tries <= self.config['max_pipelining_retries'])))
-
+        # good to go?
         if go:
-            _task = {'task': 'bright_star_pipeline', 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
-            return _task
+            # should and can run BSP pipeline itself?
+            _part = 'bright_star_pipeline'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                return _task
 
-
+            # should and can run Strehl calculation?
+            _part = 'bright_star_pipeline:strehl'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                return _task
+            # should and can run PCA pipeline?
+            _part = 'bright_star_pipeline:pca'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                return _task
 
         # TODO: FSP?
 
         # TODO: EOP?
 
+        # FIXME: do something something else?
+
         return _task
 
     def check_raws(self, _location, _date, _date_raw_data):
+        """
+            Check if raw data files info in DB is correct and up-to-date
+        :param _location:
+        :param _date:
+        :param _date_raw_data:
+        :return:
+        """
         try:
             # raw file names
             _raws = [_s for _s in _date_raw_data if re.match(re.escape(self.id), _s) is not None]
+            # deleted?!
+            if len(_raws) == 0:
+                return {'status': 'error', 'message': 'raw files for {:s} not available any more'.format(self.id),
+                        'db_record_update': ({'_id': self.id},
+                                             {'$set': {
+                                                 'raw_data.data': [],
+                                                 'raw_data.last_modified': utc_now()
+                                             }}
+                                             )
+                        }
             # time tags. use the 'freshest' time tag for 'last_modified'
             time_tags = [datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_location, _date, _s)).st_mtime)
                          for _s in _raws]
@@ -1497,10 +1623,15 @@ class RoboaoObservation(Observation):
 
         except Exception as _e:
             traceback.print_exc()
-            return {'status': 'error', 'message': _e}
+            return {'status': 'error', 'message': str(_e)}
 
     def check_distributed(self):
-        pass
+        try:
+            return {'status': 'ok', 'message': None}
+
+        except Exception as _e:
+            traceback.print_exc()
+            return {'status': 'error', 'message': _e}
 
     def parse(self, _program_pi):
         """
@@ -1651,15 +1782,7 @@ class RoboaoObservation(Observation):
             'comment': None
         }
 
-    def pipeline(self):
-        """
-            Construct and execute decision chain
-        :return:
-        """
-        raise NotImplementedError
 
-
-# TODO:
 class Pipeline(object):
     def __init__(self, _config, _db_entry):
         """
@@ -1681,14 +1804,15 @@ class Pipeline(object):
         """
         raise NotImplementedError
 
-    def init_status(self):
+    @staticmethod
+    def init_status():
         """
             Initialize status dict
         :return:
         """
         raise NotImplementedError
 
-    def run(self):
+    def run(self, part):
         """
             Run the pipeline
             # :param aux: auxiliary data including calibration
@@ -1710,7 +1834,7 @@ class RoboaoBrightStarPipeline(Pipeline):
         ''' initialize super class '''
         super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
 
-        # name the pipeline. in DB, this
+        # pipeline name. This goes to 'pipelined' field of obs DB entry
         self.name = 'bright_star'
 
         # initialize status
@@ -1739,7 +1863,39 @@ class RoboaoBrightStarPipeline(Pipeline):
 
         return go
 
-    def init_status(self):
+    def check_conditions(self, part=None):
+        """
+            Perform condition checks for running specific parts of pipeline
+            :param part: which part of pipeline to run
+        :return:
+        """
+        assert part is not None, 'must specify what to check'
+
+        # check the BSP itself?
+        if part == 'bright_star_pipeline':
+            # force redo requested?
+            _force_redo = self.db_entry['pipelined'][self.name]['status']['force_redo']
+            # pipeline done?
+            _done = self.db_entry['pipelined'][self.name]['status']['done']
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['status']['retries']
+
+            go = _force_redo or ((not _done) and (_num_tries <= self.config['misc']['max_retries']))
+
+            return go
+
+        # Strehl calculation for the results of BSP processing?
+        elif part == 'bright_star_pipeline:strehl':
+
+            return False
+
+        # Run PCA high-contrast processing pipeline?
+        elif part == 'bright_star_pipeline:pca':
+
+            return False
+
+    @staticmethod
+    def init_status():
         time_now_utc = utc_now()
         return {
             'status': {
@@ -1792,14 +1948,61 @@ class RoboaoBrightStarPipeline(Pipeline):
             }
         }
 
-    def run(self):
+    def run(self, part=None):
         """
-            Execute pipeline
+            Execute specific part of pipeline
         :return:
         """
         # TODO:
-        # steps from reduce_data_multithread.py + image_reconstruction.cpp
-        return {'status': 'fail'}
+        assert part is not None, 'must specify part to execute'
+
+        if part == 'bright_star_pipeline':
+            # steps from reduce_data_multithread.py + image_reconstruction.cpp
+
+            return {'status': 'ok', 'message': None}
+
+        elif part == 'bright_star_pipeline:strehl':
+            # compute strehl
+
+            return {'status': 'ok', 'message': None}
+
+        elif part == 'bright_star_pipeline:pca':
+            # run high-contrast pipeline
+
+            return {'status': 'ok', 'message': None}
+
+        else:
+            return {'status': 'error', 'message': 'unknown pipeline part'}
+
+
+def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
+        # TODO: run the pipeline
+        pip.run(part='bright_star_pipeline')
+
+        return {'_id': _id, 'job': 'bright_star_pipeline',
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        # failed? flush status:
+        _status = RoboaoBrightStarPipeline.init_status()
+        # retries++
+        _status['retries'] += 1
+        return {'_id': _id, 'job': 'bright_star_pipeline',
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': _status
+                                     }}
+                                     )
+                }
 
 
 if __name__ == '__main__':
