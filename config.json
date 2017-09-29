@@ -1,8 +1,14 @@
 {
   "server": {
     "environment": "test",
+    "host": "0.0.0.0",
+    "port": "8082",
+    "analysis_machine_external_host": "140.252.53.120",
+    "analysis_machine_external_port": "22220",
     "help": {
       "self": "global server settings",
+      "host": "host ip for test env deployment",
+      "port": "port for test env deployment. in production, this is handled by supervisord/gunicorn",
       "environment": "'test' or 'production'"
     }
   },
@@ -56,7 +62,7 @@
     "archiving_start_date": "2016/03/05",
     "max_retries": 20,
     "logging_level": "debug",
-    "nap_at_night": true,
+    "nap_at_night": false,
     "nap_time_frame": "local",
     "nap_time_start": "23:30",
     "nap_time_stop": "04:00",

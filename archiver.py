@@ -23,6 +23,7 @@ import re
 from astropy.io import fits
 import pyprind
 import functools
+import hashlib
 
 
 def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
@@ -39,8 +40,8 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
     """
 
     try:
-        p0 = subprocess.Popen(['lbunzip2'])
-        p0.wait()
+        subprocess.run(['which', 'lbunzip2'], check=True)
+        print('found lbzip2 in the system')
     except Exception as _e:
         print(_e)
         print('lbzip2 not installed in the system. go ahead and install it!')
@@ -69,16 +70,10 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
         # else go ahead
         # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
         with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
-            _p = subprocess.Popen('lbunzip2'.split(), stdin=subprocess.PIPE, stdout=_f_out)
-            _p.communicate(input=_f_in.read())
-            # wait for it to finish
-            _p.wait()
+            subprocess.run(['lbunzip2'], input=_f_in.read(), stdout=_f_out)
         # remove the original if requested:
         if not _keep:
-            _p = subprocess.Popen(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))])
-            # wait for it to finish
-            _p.wait()
-            # pass
+            subprocess.run(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))], check=True)
         if _v:
             bar.update(iterations=os.stat(file_in).st_size)
 
@@ -230,6 +225,13 @@ class SetQueue(Queue):
 
     def _put(self, item):
 
+        # print('_______________________')
+        # print(item in self.queue)
+        # # print(item)
+        # for ii, i in enumerate(self.queue):
+        #     print(ii, i['id'], i['task'])
+        # print('_______________________')
+
         if item in self.queue:
             # do not count it since it's not going to be added to the set!
             # see line 144 in queue.py (python 3.6)
@@ -279,7 +281,12 @@ class Archiver(object):
 
             ''' set up processing queue '''
             # we will be submitting processing tasks to it
-            self.q = OrderedSetQueue()
+            # self.q = OrderedSetQueue()
+            # self.q = SetQueue()
+            self.q = Queue()
+
+            # keep hash values of enqueued tasks to prevent submitting particular task multiple times
+            self.task_hashes = set()
 
             # now we need to map our queue over task_runner and gather results in another queue.
             # user must setup specific tasks/jobs in task_runner, which (unfortunately)
@@ -303,7 +310,32 @@ class Archiver(object):
             traceback.print_exc()
             sys.exit()
 
+    def hash_task(self, _task):
+        """
+            Compute hash for a hashable task
+        :return:
+        """
+        ht = hashlib.blake2b(digest_size=12)
+        ht.update(_task.encode('utf-8'))
+        hsh = ht.hexdigest()
+        # # it's a set, so don't worry about adding a hash multiple times
+        # self.task_hashes.add(hsh)
+
+        return hsh
+
+    # def unhash_task(self, _hsh):
+    #     """
+    #         Remove hexdigest-ed hash from self.task_hashes
+    #     :return:
+    #     """
+    #     self.task_hashes.remove(_hsh)
+
     def harvester(self):
+        """
+            Harvest processing results from dask.distributed results queue, update DB entries if necessary.
+            Specific implementation details are defined in subclass
+        :return:
+        """
         raise NotImplementedError
 
     @staticmethod
@@ -563,18 +595,26 @@ class RoboaoArchiver(Archiver):
             while not self.results.empty():
                 try:
                     result = self.results.get()
-                    self.logger.info('Task finished saying: ', result)
-                    print('Task finished saying:\n', result)
+                    # self.logger.debug('Task finished saying: {:s}'.format(str(result)))
+                    print('Task finished saying:\n', str(result))
+                    self.logger.info('Task {:s} for {:s} finished with status {:s}'.format(result['job'],
+                                                                                           result['_id'],
+                                                                                           result['status']))
                     # TODO: update DB entry
                     if 'db_record_update' in result:
-                        self.update_db_entry(result['db_record_update'])
+                        self.update_db_entry(_collection='coll_obs', upd=result['db_record_update'])
+                    # TODO: remove from self.task_hashes
+                    if result['status'] == 'ok' and 'hash' in result:
+                        self.task_hashes.remove(result['hash'])
                 except Exception as _e:
+                    print(_e)
+                    traceback.print_exc()
                     self.logger.error(_e)
             # don't need to check that too often
             time.sleep(5)
 
     @staticmethod
-    def task_runner(argdict):
+    def task_runner(argdict_and_hash):
         """
             Helper function that maps over 'data'
 
@@ -586,39 +626,43 @@ class RoboaoArchiver(Archiver):
         :return:
         """
         try:
-            # unpack jsonified dict:
-            argdict = json.loads(argdict, object_hook=json_util.object_hook)
+            # unpack jsonified dict representing task:
+            argdict = json.loads(argdict_and_hash[0], object_hook=json_util.object_hook)
+            # get task hash:
+            _task_hash = argdict_and_hash[1]
 
             assert 'task' in argdict, 'specify which task to run'
             print('running task {:s}'.format(argdict['task']))
 
             if argdict['task'] == 'bright_star_pipeline':
                 result = job_bright_star_pipeline(_id=argdict['id'], _config=argdict['config'],
-                                                  _db_entry=argdict['db_entry'])
+                                                  _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
             elif argdict['task'] == 'bright_star_pipeline:strehl':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             elif argdict['task'] == 'bright_star_pipeline:pca':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             elif argdict['task'] == 'faint_star_pipeline':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             elif argdict['task'] == 'faint_star_pipeline:strehl':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             elif argdict['task'] == 'faint_star_pipeline:pca':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             elif argdict['task'] == 'extended_object_pipeline':
-                result = {'status': 'error', 'message': 'not implemented'}
+                result = {'status': 'error', 'message': 'not implemented yet'}
 
             else:
                 result = {'status': 'error', 'message': 'unknown task'}
 
         except Exception as _e:
             # exception here means bad argdict.
+            print(_e)
+            traceback.print_exc()
             result = {'status': 'error', 'message': str(_e)}
 
         return result
@@ -824,32 +868,35 @@ class RoboaoArchiver(Archiver):
         return sorted([os.path.basename(_p) for _p in glob.glob(os.path.join(_location, _date, '*.fits.bz2'))])
 
     @timeout(seconds_before_timeout=30)
-    def db_insert(self, _collection=None, _doc=None):
+    def insert_db_entry(self, _collection=None, _db_entry=None):
         """
             Insert a document _doc to collection _collection in DB.
             It is monitored for timeout in case DB connection hangs for some reason
         :param _collection:
-        :param _doc:
+        :param _db_entry:
         :return:
         """
         assert _collection is not None, 'Must specify collection'
-        assert _doc is not None, 'Must specify document'
+        assert _db_entry is not None, 'Must specify document'
         try:
-            self.db[_collection].insert_one(_doc)
+            self.db[_collection].insert_one(_db_entry)
         except Exception as e:
-            self.logger.error('Error inserting {:s} into {:s}'.format(_doc, _collection))
+            self.logger.error('Error inserting {:s} into {:s}'.format(_db_entry, _collection))
             self.logger.error(e)
 
-    @timeout(seconds_before_timeout=30)
+    # @timeout(seconds_before_timeout=30)
     def update_db_entry(self, _collection=None, upd=None):
         """
             Update DB entry
+            Note: it's mainly used by archiver's harvester, which is run in separate thread,
+                  therefore signals don't work :(
         :return:
         """
         assert _collection is not None, 'Must specify collection'
         assert upd is not None, 'Must specify update'
         try:
             self.db[_collection].update_one(upd[0], upd[1])
+            self.logger.info('Updated DB entry for {:s}'.format(upd[0]['_id']))
         except Exception as e:
             self.logger.error('Error executing {:s} for {:s}'.format(upd, _collection))
             self.logger.error(e)
@@ -942,7 +989,8 @@ class RoboaoArchiver(Archiver):
                                 # if entry not in database, create empty one and populate it
                                 if select is None:
                                     # insert empty entry for date into aux database:
-                                    self.db_insert(_collection='coll_aux', _doc=self.empty_db_aux_entry(date))
+                                    self.insert_db_entry(_collection='coll_aux',
+                                                         _db_entry=self.empty_db_aux_entry(date))
                             except Exception as _e:
                                 print(_e)
                                 traceback.print_exc()
@@ -1018,6 +1066,7 @@ class RoboaoArchiver(Archiver):
                                     continue
 
                                 try:
+                                    # init RoboaoObservation object
                                     roboao_obs = RoboaoObservation(_id=obs, _aux=aux_date,
                                                                    _program_pi=self.db['program_pi'],
                                                                    _db_entry=select,
@@ -1030,11 +1079,24 @@ class RoboaoArchiver(Archiver):
                                     continue
 
                                 try:
+                                    # init DB entry if not in DB
+                                    if select is None:
+                                        self.insert_db_entry(_collection='coll_obs', _db_entry=roboao_obs.db_entry)
+                                        self.logger.info('Inserted {:s} into DB'.format(obs))
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Initial DB insertion failed for {:s}.'.format(obs))
+                                    continue
+
+                                try:
                                     # check raws
                                     s = roboao_obs.check_raws(_location=location, _date=date,
                                                               _date_raw_data=date_raw_data)
                                     # changes detected?
                                     if s['status'] == 'ok' and s['message'] is not None:
+                                        print(s['db_record_update'])
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected raw_data entry for {:s}'.format(obs))
                                         self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
@@ -1077,12 +1139,24 @@ class RoboaoArchiver(Archiver):
                                     # complicating things.
                                     # self.task_runner will take care of executing the task
                                     pipe_task = roboao_obs.get_task()
-                                    print({'id': pipe_task['id'], 'task': pipe_task['task']})
+
                                     if pipe_task is not None:
-                                        # try enqueueing. SetQueue takes care of possible duplicates
+                                        # try enqueueing. self.task_hashes takes care of possible duplicates
                                         # use json dumps to serialize input dictionary _task. this way,
-                                        # it may be pickled and enqueued
-                                        self.q.put(json.dumps(pipe_task, default=json_util.default))
+                                        # it may be pickled and enqueued (and also hashed:)
+                                        pipe_task_hashable = json.dumps(pipe_task, default=json_util.default)
+
+                                        # compute hash for task:
+                                        pipe_task_hash = self.hash_task(pipe_task_hashable)
+                                        # not enqueued?
+                                        if pipe_task_hash not in self.task_hashes:
+                                            print({'id': pipe_task['id'], 'task': pipe_task['task']})
+                                            # enqueue the task together with its hash:
+                                            self.q.put((pipe_task_hashable, pipe_task_hash))
+                                            # bookkeeping:
+                                            self.task_hashes.add(pipe_task_hash)
+                                            self.logger.info('Enqueueing task {:s} for {:s}'.format(pipe_task['task'],
+                                                                                                    pipe_task['id']))
                                 except Exception as _e:
                                     print(_e)
                                     traceback.print_exc()
@@ -1593,11 +1667,15 @@ class RoboaoObservation(Observation):
             _raws = [_s for _s in _date_raw_data if re.match(re.escape(self.id), _s) is not None]
             # deleted?!
             if len(_raws) == 0:
+                self.db_entry['raw_data']['location'] = []
+                self.db_entry['raw_data']['data'] = []
+                self.db_entry['raw_data']['last_modified'] = utc_now()
                 return {'status': 'error', 'message': 'raw files for {:s} not available any more'.format(self.id),
                         'db_record_update': ({'_id': self.id},
                                              {'$set': {
+                                                 'raw_data.location': [],
                                                  'raw_data.data': [],
-                                                 'raw_data.last_modified': utc_now()
+                                                 'raw_data.last_modified': self.db_entry['raw_data']['last_modified']
                                              }}
                                              )
                         }
@@ -1606,14 +1684,22 @@ class RoboaoObservation(Observation):
                          for _s in _raws]
             time_tag = max(time_tags)
 
-            # changed? the archiver will have to update database entry then:
-            if abs((time_tag - self.db_entry['raw_data']['last_modified']).total_seconds()) > 1.0:
+            # init/changed? the archiver will have to update database entry then:
+            if (len(self.db_entry['raw_data']['data']) == 0) or \
+                    (abs((time_tag - self.db_entry['raw_data']['last_modified']).total_seconds()) > 1.0):
+                self.db_entry['raw_data']['location'] = ['{:s}:{:s}'.format(
+                                                            self.config['server']['analysis_machine_external_host'],
+                                                            self.config['server']['analysis_machine_external_port']),
+                                                            _location]
+                self.db_entry['raw_data']['data'] = sorted(_raws)
+                self.db_entry['raw_data']['last_modified'] = time_tag
                 # DB updates are handled by the main archiver process
                 # we'll provide it with proper query to feed into pymongo's update_one()
                 return {'status': 'ok', 'message': 'raw files changed',
                         'db_record_update': ({'_id': self.id},
                                              {'$set': {
-                                                    'raw_data.data': sorted(_raws),
+                                                    'raw_data.location': self.db_entry['raw_data']['location'],
+                                                    'raw_data.data': self.db_entry['raw_data']['data'],
                                                     'raw_data.last_modified': time_tag
                                              }}
                                              )
@@ -1665,6 +1751,12 @@ class RoboaoObservation(Observation):
         # marker:
         _marker = _tmp[-3:-2][0]
 
+        # telescope: TODO: move this to config.json
+        if _date_utc > datetime.datetime(2015, 10, 1):
+            _telescope = 'KPNO_2.1m'
+        else:
+            _telescope = 'Palomar_P60'
+
         return {
             'science_program': {
                 'program_id': _prog_num,
@@ -1675,6 +1767,7 @@ class RoboaoObservation(Observation):
             'date_utc': _date_utc,
             'marker': _marker,
             'camera': _camera,
+            'telescope': _telescope
         }
 
     def init_db_entry(self):
@@ -1684,7 +1777,7 @@ class RoboaoObservation(Observation):
             """
         time_now_utc = utc_now()
         return {
-            '_id': None,
+            '_id': self.id,
             'date_added': time_now_utc,
             'name': None,
             'alternative_names': [],
@@ -1705,63 +1798,7 @@ class RoboaoObservation(Observation):
                 # 'radec_geojson': None,
                 'azel': None
             },
-            'pipelined': {
-                'automated': {
-
-                },
-                'faint': {
-                    'status': {
-                        'force_redo': False,
-                        'enqueued': False,
-                        'done': False,
-                        'retries': 0
-                    },
-                    'preview': {
-                        'force_redo': False,
-                        'done': False,
-                        'retries': 0,
-                        'last_modified': time_now_utc
-                    },
-                    'location': [],
-                    'lock_position': None,
-                    'fits_header': {},
-                    'shifts': None,
-                    'strehl': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'lock_position': None,
-                        'ratio_percent': None,
-                        'core_arcsec': None,
-                        'halo_arcsec': None,
-                        'fwhm_arcsec': None,
-                        'flag': None,
-                        'last_modified': time_now_utc
-                    },
-                    'pca': {
-                        'status': {
-                            'force_redo': False,
-                            'enqueued': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'preview': {
-                            'force_redo': False,
-                            'done': False,
-                            'retries': 0
-                        },
-                        'location': [],
-                        'lock_position': None,
-                        'contrast_curve': None,
-                        'last_modified': time_now_utc
-                    },
-                    'last_modified': time_now_utc
-                },
-
-            },
+            'pipelined': {},
 
             'seeing': {
                 'median': None,
@@ -1903,8 +1940,8 @@ class RoboaoBrightStarPipeline(Pipeline):
                 'enqueued': False,
                 'force_redo': False,
                 'retries': 0,
-                'last_modified': time_now_utc
             },
+            'last_modified': time_now_utc,
             'preview': {
                 'done': False,
                 'force_redo': False,
@@ -1956,8 +1993,26 @@ class RoboaoBrightStarPipeline(Pipeline):
         # TODO:
         assert part is not None, 'must specify part to execute'
 
+        # UTC date of obs:
+        _date = self.db_entry['date_utc'].strftime('%Y%m%d')
+
+        # path to store unzipped raw files
+        _path_tmp = self.config['path']['path_tmp']
+        # path to raw files:
+        _path_raw = os.path.join(self.db_entry['raw_data']['location'][1], _date)
+        # path to lucky-pipelined data:
+        _path_archive = os.path.join(self.config['path']['path_archive'], _date)
+        # path to calibration data produced by lucky pipeline:
+        _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
+
         if part == 'bright_star_pipeline':
             # steps from reduce_data_multithread.py + image_reconstruction.cpp
+
+            # raw files:
+            _raws_zipped = sorted(self.db_entry['raw_data']['data'])
+
+            # unbzip raw source file(s):
+            lbunzip2(_path_in=_path_raw, _files=_raws_zipped, _path_out=_path_tmp, _keep=True)
 
             return {'status': 'ok', 'message': None}
 
@@ -1975,14 +2030,14 @@ class RoboaoBrightStarPipeline(Pipeline):
             return {'status': 'error', 'message': 'unknown pipeline part'}
 
 
-def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None):
+def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=None):
     try:
         # init pipe here again. [as it's not JSON serializable]
         pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
         # TODO: run the pipeline
-        pip.run(part='bright_star_pipeline')
+        s = pip.run(part='bright_star_pipeline')
 
-        return {'_id': _id, 'job': 'bright_star_pipeline',
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
@@ -1995,7 +2050,7 @@ def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None):
         _status = RoboaoBrightStarPipeline.init_status()
         # retries++
         _status['retries'] += 1
-        return {'_id': _id, 'job': 'bright_star_pipeline',
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
