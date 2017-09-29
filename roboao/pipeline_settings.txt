@@ -1,0 +1,62 @@
+# Input file for Robo-AO image_reconstruction
+# Version: 1.0
+# --------------------------------
+
+[Input files]
+???
+
+# the following two sections are ignored if interactive strehl region specification is turned on
+
+[Strehls]
+# runID   Region num    Coords
+???
+
+[Background]
+#runID  Coords
+???
+
+[Processing options]
+Metric (strehls, snt)                      : strehls
+Use resample in initial metric (yes/no)    : yes
+Use autocorrelation in initial metric      : yes
+Frame shift center (pixel, centroid)       : pixel
+Generate simulated autoguided image        : no
+???
+???
+Normalise psfs                             : yes
+Cloud protection (aggressive)              : yes
+Ref star decorrel (res. loss)              : no
+Detriple                                   : no
+Interactive bground & ref star selection   : no
+
+[Output options]
+Output selection type                      : percent
+#Percent of images to select                : 1.0 (1p.fits), 10.0 (10p.fits), 50.0 (50p.fits), 100.0 (100p.fits)
+Percent of images to select                : 20.0 (20p.fits), 100.0 (100p.fits)
+# default instead of coordinates to use the middle of strehl region 1
+Position to shift to (input file scale)    : default
+Display results in program                 : yes
+Output PSF summary image                   : psfs.fits
+Pgplot device (? to ask on run)            : /NULL
+
+# Simple S&A is equivalent to pixfrac = 1, scale factor = 1
+# Reasonable drizzle settings are pixfrac = 0.45, scale factor = 2.0
+Drizzle pixfrac (0..1)                     : 0.45
+Drizzle scale factor (>= 1)                : 2.0
+
+[Telescope parameters]
+m" / pixel                                 : 35.16
+Typical wavelength (m)                     : 700.0e-09
+Telescope diameter (m)                     : 1.85
+
+[PSF summary image]
+PSFs to include                            : 40
+Columns                                    : 4
+PSF size (pixels diameter around center)   : 100
+
+[Autoguider parameters]
+Autoguider ouput image file                : autog.fits
+
+[Misc options]
+Saturation threshold                       : 35000.0
+Ignore saturated frames                    : no

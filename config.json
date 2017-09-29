@@ -81,6 +81,7 @@
   },
   "pipeline": {
     "bright_star": {
+      "pipeline_settings_template": "/Users/dmitryduev/_caltech/python/archiver/roboao/pipeline_settings.txt",
       "go": {
         "science_program.program_id": "not in [24]",
         "help": {

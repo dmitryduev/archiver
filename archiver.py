@@ -11,6 +11,7 @@ import inspect
 import os
 import subprocess
 import numpy as np
+import scipy as sp
 import glob
 import traceback
 import sys
@@ -24,6 +25,31 @@ from astropy.io import fits
 import pyprind
 import functools
 import hashlib
+
+
+def export_fits(path, _data, _header=None):
+    """
+        Save fits file overwriting if exists
+    :param path:
+    :param _data:
+    :param _header:
+    :return:
+    """
+    if _header is not None:
+        hdu = fits.PrimaryHDU(_data, header=_header)
+    else:
+        hdu = fits.PrimaryHDU(_data)
+    hdulist = fits.HDUList([hdu])
+    hdulist.writeto(path, overwrite=True)
+
+
+def sigma_clip(x, sigma, niter):
+    x = np.array(x)
+    if len(x) > 3:
+        for i in range(niter):
+            xt = x - np.mean(x)
+            x = x[np.where(abs(xt) < sigma*np.std(xt))]
+    return list(x)
 
 
 def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
@@ -2014,7 +2040,210 @@ class RoboaoBrightStarPipeline(Pipeline):
             # unbzip raw source file(s):
             lbunzip2(_path_in=_path_raw, _files=_raws_zipped, _path_out=_path_tmp, _keep=True)
 
-            return {'status': 'ok', 'message': None}
+            # unzipped file names:
+            raws = [os.path.splitext(_f)[0] for _f in _raws_zipped]
+
+            ''' go off with processing '''
+            bg_diam = 50
+            gs_diam = 50
+
+            base_val = 0
+
+            files_to_analyse = []
+            for f in sorted(raws):
+                try:
+                    if (len(f.split(".")) < 2 and f.split(".")[0] != '_') or f.split(".")[-2][-2] != '_':
+                        orig_f = f
+                        with fits.open(f) as p:
+                            # sometimes the first file output is actually the smallest in number of frames
+                            if len(p) < 50:
+                                new_fn = f.rsplit(".", 1)[-2] + "_0.fits"
+                                if os.path.exists(new_fn):
+                                    f = new_fn
+                            # fs = f.split("/")[-1]
+                            files_to_analyse.append([f, orig_f])
+                except Exception as _e:
+                    print(_e)
+                    print("Failed to process", f)
+
+            for fn, orig_fn in sorted(files_to_analyse):
+                print("Analysing", orig_fn)
+                # make a directory to store this run
+                out_dir = os.path.join(_path_archive, self.db_entry['_id'])
+                os.makedirs(out_dir)
+
+                # first make a preview sum image
+                with fits.open(fn) as p:
+
+                    img_size = p[0].data.shape
+
+                    # make 5 frames and median combine them to avoid selecting cosmic rays as the guide star
+                    print("Getting initial frame average")
+                    avg_imgs = np.zeros((5, img_size[0], img_size[1]))
+
+                    for avg_n in range(0, 5):
+                        n_avg_frames = 0.0
+                        for frame_n in list(range(avg_n, len(p), 5))[::4]:
+                            avg_imgs[avg_n] += p[frame_n].data + base_val
+                            n_avg_frames += 1.0
+                        avg_imgs[avg_n] /= n_avg_frames
+
+                    avg_img = np.median(avg_imgs, axis=0)
+                    export_fits(os.path.join(out_dir, 'sum.fits'), avg_img)
+
+                    mid_portion = avg_img[30:avg_img.shape[0] - 30, 30:avg_img.shape[1] - 30]
+
+                    # if there's a NaN something's gone horribly wrong
+                    if np.sum(mid_portion) != np.sum(mid_portion):
+                        # TODO:
+                        classified_as = 'failed'
+                        raise RuntimeError('Something went horribly wrong')
+
+                    print(mid_portion.shape)
+
+                    mid_portion = sp.ndimage.gaussian_filter(mid_portion, sigma=10)
+
+                    # subtract off a much more smoothed version to remove large-scale gradients across the image
+                    mid_portion -= sp.ndimage.gaussian_filter(mid_portion, sigma=60)
+
+                    mid_portion = mid_portion[30:mid_portion.shape[0] - 30, 30:mid_portion.shape[1] - 30]
+
+                    # pyfits.PrimaryHDU(mid_portion).writeto("filtered_img.fits",clobber=True)
+
+                    final_gs_y, final_gs_x = np.unravel_index(mid_portion.argmax(), mid_portion.shape)
+                    final_gs_y += 60
+                    final_gs_x += 60
+                    print("\tGuide star selected at:", final_gs_x, final_gs_y)
+
+                    # now guess the background region
+                    final_bg_x = final_gs_x + gs_diam
+                    final_bg_y = final_gs_y + gs_diam
+
+                    if final_bg_x > mid_portion.shape[1]:
+                        final_bg_x = mid_portion.shape[1]
+                    if final_bg_y > mid_portion.shape[0]:
+                        final_bg_y = mid_portion.shape[0]
+
+                    print("\tGenerating S&A image")
+
+                    # now do a really simple S&A preview, using the selected guide star
+                    # also track the SNR of the star to get an estimate for the
+                    # imaging performance
+                    with open(os.path.join(out_dir, 'quicklook_stats.txt'), 'w') as stats_out:
+
+                        snrs = []
+                        output_image = np.zeros((img_size[0] * 2, img_size[1] * 2))
+                        for frame_n in range(0, len(p), 3):
+                            if frame_n % 9 == 0:
+                                # print("\r\t", frame_n, "/", len(p))
+                                # sys.stdout.flush()
+                                pass
+
+                            gs_region = p[frame_n].data[final_gs_y - gs_diam / 2:final_gs_y + gs_diam / 2,
+                                        final_gs_x - gs_diam / 2:final_gs_x + gs_diam / 2] + base_val
+                            gs_region = gs_region.astype(float)
+
+                            # using the BG region as an estimate of the background noise
+                            bg_region = p[frame_n].data[final_bg_y - gs_diam / 4:final_bg_y + gs_diam / 4,
+                                        final_bg_x - gs_diam / 4:final_bg_x + gs_diam / 4]
+                            bg_rms = np.std(bg_region)
+                            bg_base = np.average(bg_region)
+
+                            blurred_version = sp.ndimage.gaussian_filter(gs_region, sigma=1)
+
+                            max_posn = np.unravel_index(blurred_version.argmax(), blurred_version.shape)
+                            max_posn_y = max_posn[0] + final_gs_y - gs_diam / 2
+                            max_posn_x = max_posn[1] + final_gs_x - gs_diam / 2
+
+                            # region around guide star, to include PSF-convolution
+                            signal = np.sum(
+                                gs_region[max_posn[0] - 2:max_posn[0] + 3, max_posn[1] - 2:max_posn[1] + 3] - bg_base)
+
+                            snrs.append(signal / bg_rms)
+
+                            stats_out.write('{:d} {:f} {:f} {:f} {:f} {:f}\n'.format(frame_n, signal / bg_rms,
+                                                                                        signal, bg_rms, bg_base,
+                                                    np.sum(gs_region[max_posn[0] - 2 - 20:max_posn[0] + 3 - 20,
+                                                           max_posn[1] - 2 - 20:max_posn[1] + 3 - 20] - bg_base)))
+
+                            dx = final_gs_x - max_posn_x
+                            dy = final_gs_y - max_posn_y
+
+                            out_start_x = img_size[1] / 2 + dx
+                            out_start_y = img_size[0] / 2 + dy
+
+                            if (0 < out_start_x < img_size[1]) and (0 < out_start_y < img_size[0]):
+                                output_image[out_start_y:out_start_y + img_size[0],
+                                             out_start_x:out_start_x + img_size[1]] += p[frame_n].data + base_val
+                        output_image = output_image[20 + img_size[1] / 2:(img_size[1] * 3) / 2 - 20,
+                                       20 + img_size[0] / 2:(img_size[0] * 3) / 2 - 20]
+                        export_fits(os.path.join(out_dir, self.db_entry['_id'] + '_preview_saa.fits'), output_image)
+
+                    valid_snrs = []
+                    for s in snrs:
+                        if 0.0 < s < 1.0e8:
+                            valid_snrs.append(s)
+                    valid_snrs = sigma_clip(valid_snrs, 3, 2)
+                    snr = np.average(valid_snrs)
+                    print("\tSNR: {:.1f}".format(snr))
+
+                    print("\tGenerating lucky settings file")
+                    # first find all the files for this target
+                    extra_files = glob.glob(fn.rsplit(".", 1)[0] + "_?.fits")
+                    all_files = [fn]
+                    for e in extra_files:
+                        all_files.append(e)
+
+                    out_settings = open(out_dir + "/pipeline_settings.txt", "w")
+                    settings_out_n = 0
+                    for l in open(self.config['pipeline']['bright_star']['pipeline_settings_template'], 'r'):
+                        if l.find("???") == 0:
+                            if settings_out_n == 0:
+                                file_n = 0
+                                for f in all_files:
+                                    n_frames = len(pyfits.open(f))
+                                    print >> out_settings, file_n, "     " + f + "    0-" + repr(n_frames - 1)
+                                    file_n += 1
+                                settings_out_n += 1
+                            elif settings_out_n == 1:
+                                for file_n, f in enumerate(all_files):
+                                    print >> out_settings, file_n, "     ", 1, "     ", "(" + repr(
+                                        final_gs_x - gs_diam / 2) + "," + repr(final_gs_y - gs_diam / 2) + "),(" + repr(
+                                        final_gs_x + gs_diam / 2) + "," + repr(final_gs_y + gs_diam / 2) + ")"
+                                settings_out_n += 1
+                            elif settings_out_n == 2:
+                                for file_n, f in enumerate(all_files):
+                                    print >> out_settings, file_n, "     ", "(" + repr(
+                                        final_bg_x - bg_diam / 2) + "," + repr(final_bg_y - bg_diam / 2) + "),(" + repr(
+                                        final_bg_x + bg_diam / 2) + "," + repr(final_bg_y + bg_diam / 2) + ")"
+                                settings_out_n += 1
+                            elif settings_out_n == 3:
+                                with pyfits.open(all_files[0]) as f_fits:
+                                    camera_mode = f_fits[0].header['MODE_NUM']
+                                    naxis1 = int(f_fits[0].header['NAXIS1'])
+                                    if naxis1 == 256:
+                                        camera_mode = repr(camera_mode) + '4'
+                                    else:
+                                        camera_mode = repr(camera_mode)
+                                date = all_files[0].split("/")[-1].rsplit("_")[-2]
+                                print >> out_settings, "Bias file (filename/none)                  : " + calib_dirs + "/" + date + "/calib/dark_" + camera_mode + ".fits"
+                                settings_out_n += 1
+                            elif settings_out_n == 4:
+                                filt = all_files[0].split("/")[-1].rsplit("_")[-4]
+                                date = all_files[0].split("/")[-1].rsplit("_")[-2]
+                                print >> out_settings, "Flat (filename/none)                       : " + calib_dirs + "/" + date + "/calib/flat_" + filt + ".fits"
+                                settings_out_n += 1
+
+                        else:
+                            print >> out_settings, l.strip()
+                    out_settings.close()
+
+                    if snr < 20.0 or len(snrs) < 20:
+                        classified_as = 'zero_flux'
+                    elif snr < 100.0:
+                        classified_as = 'faint'
+                    else:
+                        classified_as = 'high_flux'
 
         elif part == 'bright_star_pipeline:strehl':
             # compute strehl
@@ -2035,7 +2264,7 @@ def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=
         # init pipe here again. [as it's not JSON serializable]
         pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
         # TODO: run the pipeline
-        s = pip.run(part='bright_star_pipeline')
+        pip.run(part='bright_star_pipeline')
 
         return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
                 'status': 'ok', 'message': str(datetime.datetime.now()),
