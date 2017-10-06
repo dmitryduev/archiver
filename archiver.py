@@ -9,9 +9,11 @@ import time
 import datetime
 import inspect
 import os
+import shutil
 import subprocess
 import numpy as np
 import scipy as sp
+import scipy.ndimage as ndimage
 import glob
 import traceback
 import sys
@@ -41,6 +43,22 @@ def export_fits(path, _data, _header=None):
         hdu = fits.PrimaryHDU(_data)
     hdulist = fits.HDUList([hdu])
     hdulist.writeto(path, overwrite=True)
+
+
+def get_fits_header(fits_file):
+    """
+        Get fits-file header
+    :param fits_file:
+    :return:
+    """
+    # read fits:
+    with fits.open(os.path.join(fits_file)) as hdulist:
+        # header:
+        header = OrderedDict()
+        for _entry in hdulist[0].header.cards:
+            header[_entry[0]] = _entry[1:]
+
+    return header
 
 
 def sigma_clip(x, sigma, niter):
@@ -288,6 +306,13 @@ class Archiver(object):
             ''' set up logging at init '''
             self.logger, self.logger_utc_date = self.set_up_logging(_name='archive', _mode='a')
 
+            # make dirs if necessary:
+            for _pp in ('archive', 'tmp'):
+                _path = self.config['path']['path_{:s}'.format(_pp)]
+                if not os.path.exists(_path):
+                    os.makedirs(_path)
+                    self.logger.debug('Created {:s}'.format(_path))
+
             ''' initialize dask.distributed LocalCluster for distributed task processing '''
             # alternative, or if workers are to be run on different machines
             '''
@@ -319,6 +344,8 @@ class Archiver(object):
             # cannot be defined inside a subclass -- only as a standalone function
             self.futures = self.c.map(self.task_runner, self.q, maxsize=self.config['parallel']['n_workers'])
             self.results = self.c.gather(self.futures)  # Gather results
+
+            self.logger.debug('Successfully set up dask.distributed cluster')
 
             # Pipelining tasks (dict of form {'task': 'task_name', 'param_a': param_a_value}, jsonified)
             # to distributed queue for execution as self.q.put(task)
@@ -1177,6 +1204,9 @@ class RoboaoArchiver(Archiver):
                                         # not enqueued?
                                         if pipe_task_hash not in self.task_hashes:
                                             print({'id': pipe_task['id'], 'task': pipe_task['task']})
+                                            # mark as enqueued in DB:
+                                            # self.update_db_entry(_collection='coll_obs',
+                                            #                      upd=pipe_task['db_record_update'])
                                             # enqueue the task together with its hash:
                                             self.q.put((pipe_task_hashable, pipe_task_hash))
                                             # bookkeeping:
@@ -1223,7 +1253,12 @@ class RoboaoArchiver(Archiver):
             # try disconnecting from the database (if connected) and closing the cluster
             try:
                 self.logger.info('Shutting down.')
+                self.logger.debug('Cleaning tmp directory.')
+                shutil.rmtree(self.config['path']['path_tmp'])
+                os.makedirs(self.config['path']['path_tmp'])
+                self.logger.debug('Disconnecting from DB.')
                 self.disconnect_from_db()
+                self.logger.debug('Shutting down dask.distributed cluster.')
                 self.cluster.close()
             finally:
                 self.logger.info('Finished archiving cycle.')
@@ -1238,7 +1273,12 @@ class RoboaoArchiver(Archiver):
             self.running = False
             try:
                 self.logger.info('Shutting down.')
+                self.logger.debug('Cleaning tmp directory.')
+                shutil.rmtree(self.config['path']['path_tmp'])
+                os.makedirs(self.config['path']['path_tmp'])
+                self.logger.debug('Disconnecting from DB.')
                 self.disconnect_from_db()
+                self.logger.debug('Shutting down dask.distributed cluster.')
                 self.cluster.close()
             finally:
                 self.logger.info('Finished archiving cycle.')
@@ -1605,7 +1645,7 @@ class RoboaoObservation(Observation):
                 _path_pipe = os.path.join(self.config['path']['path_archive'], _date, self.id, _pipe_name)
 
                 # path exists? if yes -- processing must have occurred
-                if os.path.exists(_path_pipe):
+                if (_pipe_name in self.db_entry['pipelined']) and os.path.exists(_path_pipe):
                     # check folder modified date:
                     time_tag = datetime.datetime.utcfromtimestamp(os.stat(_path_pipe).st_mtime)
                     # time_tag = mdate_walk(_path_pipe)
@@ -1656,20 +1696,47 @@ class RoboaoObservation(Observation):
             _part = 'bright_star_pipeline'
             go = pipe.check_conditions(part=_part)
             if go:
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
                 return _task
 
             # should and can run Strehl calculation?
             _part = 'bright_star_pipeline:strehl'
             go = pipe.check_conditions(part=_part)
             if go:
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
                 return _task
             # should and can run PCA pipeline?
             _part = 'bright_star_pipeline:pca'
             go = pipe.check_conditions(part=_part)
             if go:
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry}
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
                 return _task
 
         # TODO: FSP?
@@ -2011,6 +2078,55 @@ class RoboaoBrightStarPipeline(Pipeline):
             }
         }
 
+    def generate_lucky_settings_file(self, out_settings, _path_calib,
+                                     all_files, final_gs_x, final_gs_y, gs_diam,
+                                     final_bg_x, final_bg_y, bg_diam):
+        with open(out_settings, 'w') as f_out_settings:
+            settings_out_n = 0
+            for l in open(self.config['pipeline']['bright_star']['pipeline_settings_template'], 'r'):
+                if l.find("???") == 0:
+                    if settings_out_n == 0:
+                        file_n = 0
+                        for f in all_files:
+                            with fits.open(f) as _tmp:
+                                n_frames = len(_tmp)
+                            f_out_settings.write('{:<7d}{:s}    0-{:d}\n'.format(file_n, f, n_frames - 1))
+                            file_n += 1
+                        settings_out_n += 1
+                    elif settings_out_n == 1:
+                        for file_n, f in enumerate(all_files):
+                            f_out_settings.write('{:<8d}{:<8d}({:d},{:d}),({:d},{:d})\n'
+                                                 .format(file_n, 1,
+                                                         final_gs_x - gs_diam // 2, final_gs_y - gs_diam // 2,
+                                                         final_gs_x + gs_diam // 2, final_gs_y + gs_diam // 2))
+                        settings_out_n += 1
+                    elif settings_out_n == 2:
+                        for file_n, f in enumerate(all_files):
+                            f_out_settings.write('{:<8d}({:d},{:d}),({:d},{:d})\n'
+                                                 .format(file_n,
+                                                         final_bg_x - bg_diam // 2, final_bg_y - bg_diam // 2,
+                                                         final_bg_x + bg_diam // 2, final_bg_y + bg_diam // 2))
+                        settings_out_n += 1
+                    elif settings_out_n == 3:
+                        with fits.open(all_files[0]) as f_fits:
+                            camera_mode = f_fits[0].header['MODE_NUM']
+                            naxis1 = int(f_fits[0].header['NAXIS1'])
+                            if naxis1 == 256:
+                                camera_mode = repr(camera_mode) + '4'
+                            else:
+                                camera_mode = repr(camera_mode)
+                        f_out_settings.write('Bias file (filename/none)                  : ' +
+                                             os.path.join(_path_calib, 'dark_{:s}.fits\n'.format(camera_mode)))
+                        settings_out_n += 1
+                    elif settings_out_n == 4:
+                        f_out_settings.write('Flat (filename/none)                       : ' +
+                                             os.path.join(_path_calib,
+                                                          'flat_{:s}.fits\n'.format(self.db_entry['filter'])))
+                        settings_out_n += 1
+
+                else:
+                    f_out_settings.write(l)
+
     def run(self, part=None):
         """
             Execute specific part of pipeline
@@ -2041,7 +2157,7 @@ class RoboaoBrightStarPipeline(Pipeline):
             lbunzip2(_path_in=_path_raw, _files=_raws_zipped, _path_out=_path_tmp, _keep=True)
 
             # unzipped file names:
-            raws = [os.path.splitext(_f)[0] for _f in _raws_zipped]
+            raws = [os.path.join(_path_tmp, os.path.splitext(_f)[0]) for _f in _raws_zipped]
 
             ''' go off with processing '''
             bg_diam = 50
@@ -2051,30 +2167,32 @@ class RoboaoBrightStarPipeline(Pipeline):
 
             files_to_analyse = []
             for f in sorted(raws):
-                try:
-                    if (len(f.split(".")) < 2 and f.split(".")[0] != '_') or f.split(".")[-2][-2] != '_':
-                        orig_f = f
-                        with fits.open(f) as p:
-                            # sometimes the first file output is actually the smallest in number of frames
-                            if len(p) < 50:
-                                new_fn = f.rsplit(".", 1)[-2] + "_0.fits"
-                                if os.path.exists(new_fn):
-                                    f = new_fn
-                            # fs = f.split("/")[-1]
-                            files_to_analyse.append([f, orig_f])
-                except Exception as _e:
-                    print(_e)
-                    print("Failed to process", f)
+                # try:
+                if (len(f.split(".")) < 2 and f.split(".")[0] != '_') or f.split(".")[-2][-2] != '_':
+                    orig_f = f
+                    with fits.open(f) as p:
+                        # sometimes the first file output is actually the smallest in number of frames
+                        if len(p) < 50:
+                            new_fn = f.rsplit(".", 1)[-2] + '_0.fits'
+                            if os.path.exists(new_fn):
+                                f = new_fn
+                        # fs = f.split("/")[-1]
+                        files_to_analyse.append([f, orig_f])
+                # except Exception as _e:
+                #     print(_e)
+                #     print("Failed to process", f)
 
             for fn, orig_fn in sorted(files_to_analyse):
+                # print('_____________________')
+                # print(files_to_analyse)
                 print("Analysing", orig_fn)
                 # make a directory to store this run
-                out_dir = os.path.join(_path_archive, self.db_entry['_id'])
-                os.makedirs(out_dir)
+                out_dir = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+                if not os.path.exists(out_dir):
+                    os.makedirs(out_dir)
 
                 # first make a preview sum image
                 with fits.open(fn) as p:
-
                     img_size = p[0].data.shape
 
                     # make 5 frames and median combine them to avoid selecting cosmic rays as the guide star
@@ -2095,16 +2213,16 @@ class RoboaoBrightStarPipeline(Pipeline):
 
                     # if there's a NaN something's gone horribly wrong
                     if np.sum(mid_portion) != np.sum(mid_portion):
-                        # TODO:
                         classified_as = 'failed'
+                        self.db_entry['pipelined'][self.name]['classified_as'] = classified_as
                         raise RuntimeError('Something went horribly wrong')
 
                     print(mid_portion.shape)
 
-                    mid_portion = sp.ndimage.gaussian_filter(mid_portion, sigma=10)
+                    mid_portion = ndimage.gaussian_filter(mid_portion, sigma=10)
 
                     # subtract off a much more smoothed version to remove large-scale gradients across the image
-                    mid_portion -= sp.ndimage.gaussian_filter(mid_portion, sigma=60)
+                    mid_portion -= ndimage.gaussian_filter(mid_portion, sigma=60)
 
                     mid_portion = mid_portion[30:mid_portion.shape[0] - 30, 30:mid_portion.shape[1] - 30]
 
@@ -2139,44 +2257,44 @@ class RoboaoBrightStarPipeline(Pipeline):
                                 # sys.stdout.flush()
                                 pass
 
-                            gs_region = p[frame_n].data[final_gs_y - gs_diam / 2:final_gs_y + gs_diam / 2,
-                                        final_gs_x - gs_diam / 2:final_gs_x + gs_diam / 2] + base_val
+                            gs_region = p[frame_n].data[final_gs_y - gs_diam // 2: final_gs_y + gs_diam // 2,
+                                        final_gs_x - gs_diam // 2: final_gs_x + gs_diam // 2] + base_val
                             gs_region = gs_region.astype(float)
 
                             # using the BG region as an estimate of the background noise
-                            bg_region = p[frame_n].data[final_bg_y - gs_diam / 4:final_bg_y + gs_diam / 4,
-                                        final_bg_x - gs_diam / 4:final_bg_x + gs_diam / 4]
+                            bg_region = p[frame_n].data[final_bg_y - gs_diam // 4: final_bg_y + gs_diam // 4,
+                                        final_bg_x - gs_diam // 4:final_bg_x + gs_diam // 4]
                             bg_rms = np.std(bg_region)
                             bg_base = np.average(bg_region)
 
-                            blurred_version = sp.ndimage.gaussian_filter(gs_region, sigma=1)
+                            blurred_version = ndimage.gaussian_filter(gs_region, sigma=1)
 
                             max_posn = np.unravel_index(blurred_version.argmax(), blurred_version.shape)
-                            max_posn_y = max_posn[0] + final_gs_y - gs_diam / 2
-                            max_posn_x = max_posn[1] + final_gs_x - gs_diam / 2
+                            max_posn_y = max_posn[0] + final_gs_y - gs_diam // 2
+                            max_posn_x = max_posn[1] + final_gs_x - gs_diam // 2
 
                             # region around guide star, to include PSF-convolution
                             signal = np.sum(
-                                gs_region[max_posn[0] - 2:max_posn[0] + 3, max_posn[1] - 2:max_posn[1] + 3] - bg_base)
+                                gs_region[max_posn[0] - 2: max_posn[0] + 3, max_posn[1] - 2: max_posn[1] + 3] - bg_base)
 
                             snrs.append(signal / bg_rms)
 
                             stats_out.write('{:d} {:f} {:f} {:f} {:f} {:f}\n'.format(frame_n, signal / bg_rms,
-                                                                                        signal, bg_rms, bg_base,
+                                                                                     signal, bg_rms, bg_base,
                                                     np.sum(gs_region[max_posn[0] - 2 - 20:max_posn[0] + 3 - 20,
                                                            max_posn[1] - 2 - 20:max_posn[1] + 3 - 20] - bg_base)))
 
                             dx = final_gs_x - max_posn_x
                             dy = final_gs_y - max_posn_y
 
-                            out_start_x = img_size[1] / 2 + dx
-                            out_start_y = img_size[0] / 2 + dy
+                            out_start_x = img_size[1] // 2 + dx
+                            out_start_y = img_size[0] // 2 + dy
 
                             if (0 < out_start_x < img_size[1]) and (0 < out_start_y < img_size[0]):
                                 output_image[out_start_y:out_start_y + img_size[0],
                                              out_start_x:out_start_x + img_size[1]] += p[frame_n].data + base_val
-                        output_image = output_image[20 + img_size[1] / 2:(img_size[1] * 3) / 2 - 20,
-                                       20 + img_size[0] / 2:(img_size[0] * 3) / 2 - 20]
+                        output_image = output_image[20 + img_size[1] // 2: (img_size[1] * 3) // 2 - 20,
+                                       20 + img_size[0] // 2: (img_size[0] * 3) // 2 - 20]
                         export_fits(os.path.join(out_dir, self.db_entry['_id'] + '_preview_saa.fits'), output_image)
 
                     valid_snrs = []
@@ -2194,49 +2312,9 @@ class RoboaoBrightStarPipeline(Pipeline):
                     for e in extra_files:
                         all_files.append(e)
 
-                    out_settings = open(out_dir + "/pipeline_settings.txt", "w")
-                    settings_out_n = 0
-                    for l in open(self.config['pipeline']['bright_star']['pipeline_settings_template'], 'r'):
-                        if l.find("???") == 0:
-                            if settings_out_n == 0:
-                                file_n = 0
-                                for f in all_files:
-                                    n_frames = len(pyfits.open(f))
-                                    print >> out_settings, file_n, "     " + f + "    0-" + repr(n_frames - 1)
-                                    file_n += 1
-                                settings_out_n += 1
-                            elif settings_out_n == 1:
-                                for file_n, f in enumerate(all_files):
-                                    print >> out_settings, file_n, "     ", 1, "     ", "(" + repr(
-                                        final_gs_x - gs_diam / 2) + "," + repr(final_gs_y - gs_diam / 2) + "),(" + repr(
-                                        final_gs_x + gs_diam / 2) + "," + repr(final_gs_y + gs_diam / 2) + ")"
-                                settings_out_n += 1
-                            elif settings_out_n == 2:
-                                for file_n, f in enumerate(all_files):
-                                    print >> out_settings, file_n, "     ", "(" + repr(
-                                        final_bg_x - bg_diam / 2) + "," + repr(final_bg_y - bg_diam / 2) + "),(" + repr(
-                                        final_bg_x + bg_diam / 2) + "," + repr(final_bg_y + bg_diam / 2) + ")"
-                                settings_out_n += 1
-                            elif settings_out_n == 3:
-                                with pyfits.open(all_files[0]) as f_fits:
-                                    camera_mode = f_fits[0].header['MODE_NUM']
-                                    naxis1 = int(f_fits[0].header['NAXIS1'])
-                                    if naxis1 == 256:
-                                        camera_mode = repr(camera_mode) + '4'
-                                    else:
-                                        camera_mode = repr(camera_mode)
-                                date = all_files[0].split("/")[-1].rsplit("_")[-2]
-                                print >> out_settings, "Bias file (filename/none)                  : " + calib_dirs + "/" + date + "/calib/dark_" + camera_mode + ".fits"
-                                settings_out_n += 1
-                            elif settings_out_n == 4:
-                                filt = all_files[0].split("/")[-1].rsplit("_")[-4]
-                                date = all_files[0].split("/")[-1].rsplit("_")[-2]
-                                print >> out_settings, "Flat (filename/none)                       : " + calib_dirs + "/" + date + "/calib/flat_" + filt + ".fits"
-                                settings_out_n += 1
-
-                        else:
-                            print >> out_settings, l.strip()
-                    out_settings.close()
+                    self.generate_lucky_settings_file(os.path.join(out_dir, 'pipeline_settings.txt'), _path_calib,
+                                                      all_files, final_gs_x, final_gs_y, gs_diam,
+                                                      final_bg_x, final_bg_y, bg_diam)
 
                     if snr < 20.0 or len(snrs) < 20:
                         classified_as = 'zero_flux'
@@ -2244,6 +2322,32 @@ class RoboaoBrightStarPipeline(Pipeline):
                         classified_as = 'faint'
                     else:
                         classified_as = 'high_flux'
+                    self.db_entry['pipelined'][self.name]['classified_as'] = classified_as
+
+                    # run c++ code
+                    subprocess.run(['{:s} pipeline_settings.txt'.format(
+                        self.config['pipeline'][self.name]['pipeline_executable'])],
+                        check=True, shell=True, cwd=out_dir)
+
+                    # reduction successful? prepare db entry for update
+                    f100p = os.path.join(out_dir, '100p.fits')
+                    if os.path.exists(f100p):
+                        self.db_entry['pipelined'][self.name]['status']['done'] = True
+                        # save fits header
+                        self.db_entry['pipelined'][self.name]['fits_header'] = get_fits_header(f100p)
+                    else:
+                        self.db_entry['pipelined'][self.name]['status']['done'] = False
+                    self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
+                    self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
+                    self.db_entry['pipelined'][self.name]['status']['retries'] += 1
+
+                    # set last_modified as out_dir folder modified date:
+                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(out_dir).st_mtime)
+                    self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
+
+                for _file in raws:
+                    print('removing', _file)
+                    os.remove(os.path.join(_file))
 
         elif part == 'bright_star_pipeline:strehl':
             # compute strehl
@@ -2275,10 +2379,19 @@ def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=
                                      )
                 }
     except Exception as _e:
-        # failed? flush status:
-        _status = RoboaoBrightStarPipeline.init_status()
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['bright_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoBrightStarPipeline.init_status()
         # retries++
-        _status['retries'] += 1
+        _status['status']['retries'] += 1
+        _status['status']['enqueued'] = False
+        _status['status']['force_redo'] = False
+        _status['last_modified'] = utc_now()
         return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},

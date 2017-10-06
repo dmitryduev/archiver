@@ -82,6 +82,7 @@
   "pipeline": {
     "bright_star": {
       "pipeline_settings_template": "/Users/dmitryduev/_caltech/python/archiver/roboao/pipeline_settings.txt",
+      "pipeline_executable": "/Users/dmitryduev/_caltech/roboao/Pipeline/roboao_pipeline/image_reconstruction",
       "go": {
         "science_program.program_id": "not in [24]",
         "help": {
