@@ -1149,7 +1149,7 @@ class RoboaoArchiver(Archiver):
                                                               _date_raw_data=date_raw_data)
                                     # changes detected?
                                     if s['status'] == 'ok' and s['message'] is not None:
-                                        print(s['db_record_update'])
+                                        # print(s['db_record_update'])
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected raw_data entry for {:s}'.format(obs))
                                         self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
@@ -1194,9 +1194,10 @@ class RoboaoArchiver(Archiver):
                                     pipe_task = roboao_obs.get_task()
 
                                     if pipe_task is not None:
+                                        # print(pipe_task)
                                         # try enqueueing. self.task_hashes takes care of possible duplicates
                                         # use json dumps to serialize input dictionary _task. this way,
-                                        # it may be pickled and enqueued (and also hashed:)
+                                        # it may be pickled and enqueued (and also hashed):
                                         pipe_task_hashable = json.dumps(pipe_task, default=json_util.default)
 
                                         # compute hash for task:
@@ -1205,8 +1206,8 @@ class RoboaoArchiver(Archiver):
                                         if pipe_task_hash not in self.task_hashes:
                                             print({'id': pipe_task['id'], 'task': pipe_task['task']})
                                             # mark as enqueued in DB:
-                                            # self.update_db_entry(_collection='coll_obs',
-                                            #                      upd=pipe_task['db_record_update'])
+                                            self.update_db_entry(_collection='coll_obs',
+                                                                 upd=pipe_task['db_record_update'])
                                             # enqueue the task together with its hash:
                                             self.q.put((pipe_task_hashable, pipe_task_hash))
                                             # bookkeeping:
@@ -1645,19 +1646,22 @@ class RoboaoObservation(Observation):
                 _path_pipe = os.path.join(self.config['path']['path_archive'], _date, self.id, _pipe_name)
 
                 # path exists? if yes -- processing must have occurred
-                if (_pipe_name in self.db_entry['pipelined']) and os.path.exists(_path_pipe):
-                    # check folder modified date:
-                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(_path_pipe).st_mtime)
-                    # time_tag = mdate_walk(_path_pipe)
-                    # bad time tag? force redo!
-                    if abs((time_tag - self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
-                        return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
-                                'db_record_update': ({'_id': self.id},
-                                                     {'$unset': {
-                                                         'pipelined.{:s}'.format(_pipe_name): 1
-                                                     }}
-                                                     )
-                                }
+                if os.path.exists(_path_pipe):
+                    # do not check enqueued stuff here:
+                    if (_pipe_name in self.db_entry['pipelined']) and \
+                            (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']):
+                        # check folder modified date:
+                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(_path_pipe).st_mtime)
+                        # time_tag = mdate_walk(_path_pipe)
+                        # bad time tag? force redo!
+                        if abs((time_tag - self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
+                            return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
+                                    'db_record_update': ({'_id': self.id},
+                                                         {'$unset': {
+                                                             'pipelined.{:s}'.format(_pipe_name): 1
+                                                         }}
+                                                         )
+                                    }
                 # path does not exist? make sure it's not present in DB entry and/or not marked 'done'
                 elif (_pipe_name in self.db_entry['pipelined']) and \
                         self.db_entry['pipelined'][_pipe_name]['status']['done']:
@@ -1698,7 +1702,7 @@ class RoboaoObservation(Observation):
             if go:
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['status']['enqueued'] = True
                 # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['last_modified'] = utc_now()
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
                          'db_record_update': ({'_id': self.id},
                                               {'$set': {
                                                   'pipelined.{:s}'.format(pipe.name):
@@ -1714,7 +1718,7 @@ class RoboaoObservation(Observation):
             if go:
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['status']['enqueued'] = True
                 # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['last_modified'] = utc_now()
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
                          'db_record_update': ({'_id': self.id},
                                               {'$set': {
                                                   'pipelined.{:s}'.format(pipe.name):
@@ -1729,7 +1733,7 @@ class RoboaoObservation(Observation):
             if go:
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['status']['enqueued'] = True
                 # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['last_modified'] = utc_now()
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': self.db_entry,
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
                          'db_record_update': ({'_id': self.id},
                                               {'$set': {
                                                   'pipelined.{:s}'.format(pipe.name):
