@@ -27,6 +27,49 @@ from astropy.io import fits
 import pyprind
 import functools
 import hashlib
+from skimage import exposure, img_as_float
+from copy import deepcopy
+import sewpy
+from matplotlib.patches import Rectangle
+from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
+
+
+# Scale bars
+class AnchoredSizeBar(AnchoredOffsetbox):
+    def __init__(self, transform, size, label, loc,
+                 pad=0.1, borderpad=0.1, sep=2, prop=None, frameon=True):
+        """
+        Draw a horizontal bar with the size in data coordinate of the give axes.
+        A label will be drawn underneath (center-aligned).
+
+        pad, borderpad in fraction of the legend font size (or prop)
+        sep in points.
+        loc:
+            'upper right'  : 1,
+            'upper left'   : 2,
+            'lower left'   : 3,
+            'lower right'  : 4,
+            'right'        : 5,
+            'center left'  : 6,
+            'center right' : 7,
+            'lower center' : 8,
+            'upper center' : 9,
+            'center'       : 10
+        """
+        self.size_bar = AuxTransformBox(transform)
+        self.size_bar.add_artist(Rectangle((0, 0), size, 0, fc='none', color='white', lw=3))
+
+        self.txt_label = TextArea(label, dict(color='white', size='x-large', weight='normal'),
+                                  minimumdescent=False)
+
+        self._box = VPacker(children=[self.size_bar, self.txt_label],
+                            align="center",
+                            pad=0, sep=sep)
+
+        AnchoredOffsetbox.__init__(self, loc, pad=pad, borderpad=borderpad,
+                                   child=self._box,
+                                   prop=prop,
+                                   frameon=frameon)
 
 
 def export_fits(path, _data, _header=None):
@@ -43,6 +86,17 @@ def export_fits(path, _data, _header=None):
         hdu = fits.PrimaryHDU(_data)
     hdulist = fits.HDUList([hdu])
     hdulist.writeto(path, overwrite=True)
+
+
+def load_fits(fin):
+    """
+        Load fits-file
+    :param fin:
+    :return:
+    """
+    with fits.open(fin) as _f:
+        scidata = np.nan_to_num(_f[0].data)
+    return scidata
 
 
 def get_fits_header(fits_file):
@@ -68,6 +122,25 @@ def sigma_clip(x, sigma, niter):
             xt = x - np.mean(x)
             x = x[np.where(abs(xt) < sigma*np.std(xt))]
     return list(x)
+
+
+def log_gauss_score(_x, _mu=1.27, _sigma=0.17):
+    """
+        _x: pixel for pixel in [1,2048] - source FWHM.
+            has a max of 1 around 35 pix, drops fast to the left, drops slower to the right
+    """
+    return np.exp(-(np.log(np.log(_x)) - _mu)**2 / (2*_sigma**2))  # / 2
+
+
+def gauss_score(_r, _mu=0, _sigma=512):
+    """
+        _r - distance from centre to source in pix
+    """
+    return np.exp(-(_r - _mu)**2 / (2*_sigma**2))  # / 2
+
+
+def rho(x, y, x_0=1024, y_0=1024):
+    return np.sqrt((x-x_0)**2 + (y-y_0)**2)
 
 
 def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
@@ -691,6 +764,10 @@ class RoboaoArchiver(Archiver):
                 result = job_bright_star_pipeline(_id=argdict['id'], _config=argdict['config'],
                                                   _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
+            elif argdict['task'] == 'bright_star_pipeline:preview':
+                result = job_bright_star_pipeline_preview(_id=argdict['id'], _config=argdict['config'],
+                                                          _db_entry=argdict['db_entry'], _task_hash=_task_hash)
+
             elif argdict['task'] == 'bright_star_pipeline:strehl':
                 result = {'status': 'error', 'message': 'not implemented yet'}
 
@@ -1205,9 +1282,10 @@ class RoboaoArchiver(Archiver):
                                         # not enqueued?
                                         if pipe_task_hash not in self.task_hashes:
                                             print({'id': pipe_task['id'], 'task': pipe_task['task']})
-                                            # mark as enqueued in DB:
-                                            self.update_db_entry(_collection='coll_obs',
-                                                                 upd=pipe_task['db_record_update'])
+                                            if 'db_record_update' in pipe_task:
+                                                # mark as enqueued in DB:
+                                                self.update_db_entry(_collection='coll_obs',
+                                                                     upd=pipe_task['db_record_update'])
                                             # enqueue the task together with its hash:
                                             self.q.put((pipe_task_hashable, pipe_task_hash))
                                             # bookkeeping:
@@ -1651,7 +1729,8 @@ class RoboaoObservation(Observation):
                     if (_pipe_name in self.db_entry['pipelined']) and \
                             (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']):
                         # check folder modified date:
-                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(_path_pipe).st_mtime)
+                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_pipe,
+                                                                                           '100p.fits')).st_mtime)
                         # time_tag = mdate_walk(_path_pipe)
                         # bad time tag? force redo!
                         if abs((time_tag - self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
@@ -1712,6 +1791,13 @@ class RoboaoObservation(Observation):
                          }
                 return _task
 
+            # should and can run preview generation for BSP pipeline itself?
+            _part = 'bright_star_pipeline:preview'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+                return _task
+
             # should and can run Strehl calculation?
             _part = 'bright_star_pipeline:strehl'
             go = pipe.check_conditions(part=_part)
@@ -1727,6 +1813,14 @@ class RoboaoObservation(Observation):
                                               )
                          }
                 return _task
+
+            # should and can run preview generation after Strehl calculation?
+            # _part = 'bright_star_pipeline:strehl:preview'
+            # go = pipe.check_conditions(part=_part)
+            # if go:
+            #     _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+            #     return _task
+
             # should and can run PCA pipeline?
             _part = 'bright_star_pipeline:pca'
             go = pipe.check_conditions(part=_part)
@@ -1742,6 +1836,13 @@ class RoboaoObservation(Observation):
                                               )
                          }
                 return _task
+
+            # should and can run preview generation for PCA results?
+            # _part = 'bright_star_pipeline:pca:preview'
+            # go = pipe.check_conditions(part=_part)
+            # if go:
+            #     _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+            #     return _task
 
         # TODO: FSP?
 
@@ -1954,6 +2055,225 @@ class Pipeline(object):
         """
         raise NotImplementedError
 
+    def generate_preview(self, **kwargs):
+        """
+            Generate preview images
+        :return:
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def scale_image(image, correction='local'):
+        """
+
+        :param image:
+        :param correction: 'local', 'log', or 'global'
+        :return:
+        """
+        # scale image for beautification:
+        scidata = deepcopy(image)
+        norm = np.max(np.max(scidata))
+        mask = scidata <= 0
+        scidata[mask] = 0
+        scidata = np.uint16(scidata / norm * 65535)
+
+        # add more contrast to the image:
+        if correction == 'log':
+            return exposure.adjust_log(img_as_float(scidata / norm) + 1, 1)
+        elif correction == 'global':
+            p_1, p_2 = np.percentile(scidata, (5, 100))
+            return exposure.rescale_intensity(scidata, in_range=(p_1, p_2))
+        elif correction == 'local':
+            # perform local histogram equalization instead:
+            return exposure.equalize_adapthist(scidata, clip_limit=0.03)
+        else:
+            raise Exception('Contrast correction option not recognized')
+
+    @staticmethod
+    def get_xy_from_frames_txt(_path):
+        """
+            Get median centroid position for a lucky-pipelined image
+        :param _path:
+        :return:
+        """
+        with open(os.path.join(_path, 'frames.txt'), 'r') as _f:
+            f_lines = _f.readlines()
+        xy = np.array([map(float, l.split()[3:5]) for l in f_lines if l[0] != '#'])
+
+        return np.median(xy[:, 0]), np.median(xy[:, 1])
+
+    @staticmethod
+    def get_xy_from_shifts_txt(_path):
+        with open(os.path.join(_path, 'shifts.txt')) as _f:
+            f_lines = _f.readlines()
+        # skip empty lines (if accidentally present in the file)
+        f_lines = [_l for _l in f_lines if len(_l) > 1]
+
+        _tmp = f_lines[0].split()
+        x_lock, y_lock = int(_tmp[-2]), int(_tmp[-1])
+
+        return x_lock, y_lock
+
+    @staticmethod
+    def get_xy_from_pipeline_settings_txt(_path, _first=True):
+        """
+            Get centroid position for a lucky-pipelined image
+        :param _path:
+        :param _first: output the x,y from the first run? if False, output from the last
+        :return:
+        """
+        with open(os.path.join(_path, 'pipeline_settings.txt'), 'r') as _f:
+            f_lines = _f.readlines()
+
+        for l in f_lines:
+            _tmp = re.search(r'\d\s+\d\s+\((\d+),(\d+)\),\((\d+),(\d+)\)\n', l)
+            if _tmp is not None:
+                _x = (int(_tmp.group(1)) + int(_tmp.group(3))) / 2
+                _y = (int(_tmp.group(2)) + int(_tmp.group(4))) / 2
+                if _first:
+                    break
+
+        return _x, _y
+
+    @classmethod
+    def trim_frame(cls, _path, _fits_name, _win=100, _method='sextractor', _x=None, _y=None, _drizzled=True):
+        """
+            Crop image around a star, which is detected by one of the _methods
+            (e.g. SExtracted and rated)
+
+        :param _path: path
+        :param _fits_name: fits-file name
+        :param _win: window width
+        :param _method: from 'frames.txt' (if this is the output of the standard lucky pipeline),
+                        from 'pipeline_settings.txt' (if this is the output of the standard lucky pipeline),
+                        from 'shifts.txt' (if this is the output of the faint pipeline),
+                        using 'sextractor', a simple 'max', or 'manual'
+        :param _x: source x position -- if known in advance
+        :param _y: source y position -- if known in advance
+        :param _drizzled: was it drizzled?
+
+        :return: image, cropped around a lock position and the lock position itself
+        """
+        with fits.open(os.path.join(_path, _fits_name)) as _hdu:
+            scidata = np.nan_to_num(_hdu[0].data)
+
+        if _method == 'sextractor':
+            # extract sources
+            sew = sewpy.SEW(params=["X_IMAGE", "Y_IMAGE", "XPEAK_IMAGE", "YPEAK_IMAGE",
+                                    "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS"],
+                            config={"DETECT_MINAREA": 8, "PHOT_APERTURES": "10", 'DETECT_THRESH': '5.0'},
+                            sexpath="sex")
+
+            out = sew(os.path.join(_path, _fits_name))
+            # sort by FWHM
+            out['table'].sort('FWHM_IMAGE')
+            # descending order
+            out['table'].reverse()
+
+            # print(out['table'])  # This is an astropy table.
+
+            # get first 10 and score them:
+            scores = []
+            # maximum error of a Gaussian fit. Real sources usually have larger 'errors'
+            gauss_error_max = [np.max([sou['A_IMAGE'] for sou in out['table'][0:10]]),
+                               np.max([sou['B_IMAGE'] for sou in out['table'][0:10]])]
+            for sou in out['table'][0:10]:
+                if sou['FWHM_IMAGE'] > 1:
+                    score = (log_gauss_score(sou['FWHM_IMAGE']) +
+                             gauss_score(rho(sou['X_IMAGE'], sou['Y_IMAGE'])) +
+                             np.mean([sou['A_IMAGE'] / gauss_error_max[0],
+                                      sou['B_IMAGE'] / gauss_error_max[1]])) / 3.0
+                else:
+                    score = 0  # it could so happen that reported FWHM is 0
+                scores.append(score)
+
+            # print('scores: ', scores)
+
+            N_sou = len(out['table'])
+            # do not crop large planets and crowded fields
+            if N_sou != 0 and N_sou < 30:
+                # sou_xy = [out['table']['X_IMAGE'][0], out['table']['Y_IMAGE'][0]]
+                best_score = np.argmax(scores) if len(scores) > 0 else 0
+                # window size not set? set it automatically based on source fwhm
+                if _win is None:
+                    sou_size = np.max((int(out['table']['FWHM_IMAGE'][best_score] * 3), 100))
+                    _win = sou_size
+                # print(out['table']['XPEAK_IMAGE'][best_score], out['table']['YPEAK_IMAGE'][best_score])
+                # print(get_xy_from_frames_txt(_path))
+                x = out['table']['YPEAK_IMAGE'][best_score]
+                y = out['table']['XPEAK_IMAGE'][best_score]
+                x, y = map(int, [x, y])
+            else:
+                if _win is None:
+                    _win = 100
+                # use a simple max instead:
+                x, y = np.unravel_index(scidata.argmax(), scidata.shape)
+                x, y = map(int, [x, y])
+        elif _method == 'max':
+            if _win is None:
+                _win = 100
+            x, y = np.unravel_index(scidata.argmax(), scidata.shape)
+            x, y = map(int, [x, y])
+        elif _method == 'shifts.txt':
+            if _win is None:
+                _win = 100
+            y, x = cls.get_xy_from_shifts_txt(_path)
+            if _drizzled:
+                x *= 2.0
+                y *= 2.0
+            x, y = map(int, [x, y])
+        elif _method == 'frames.txt':
+            if _win is None:
+                _win = 100
+            y, x = cls.get_xy_from_frames_txt(_path)
+            if _drizzled:
+                x *= 2.0
+                y *= 2.0
+            x, y = map(int, [x, y])
+        elif _method == 'pipeline_settings.txt':
+            if _win is None:
+                _win = 100
+            y, x = cls.get_xy_from_pipeline_settings_txt(_path)
+            if _drizzled:
+                x *= 2.0
+                y *= 2.0
+            x, y = map(int, [x, y])
+        elif _method == 'manual' and _x is not None and _y is not None:
+            if _win is None:
+                _win = 100
+            x, y = _x, _y
+            x, y = map(int, [x, y])
+        else:
+            raise Exception('unrecognized trimming method.')
+
+        # out of the frame? fix that!
+        if x - _win < 0:
+            _win -= abs(x - _win)
+        if x + _win + 1 >= scidata.shape[0]:
+            _win -= abs(scidata.shape[0] - x - _win - 1)
+        if y - _win < 0:
+            _win -= abs(y - _win)
+        if y + _win + 1 >= scidata.shape[1]:
+            _win -= abs(scidata.shape[1] - y - _win - 1)
+
+        scidata_cropped = scidata[x - _win: x + _win + 1,
+                          y - _win: y + _win + 1]
+
+        return scidata_cropped, int(x), int(y)
+
+    @staticmethod
+    def makebox(array, halfwidth, peak1, peak2):
+        boxside1a = peak1 - halfwidth
+        boxside1b = peak1 + halfwidth
+        boxside2a = peak2 - halfwidth
+        boxside2b = peak2 + halfwidth
+
+        box = array[int(boxside1a):int(boxside1b), int(boxside2a):int(boxside2b)]
+        box_fraction = np.sum(box) / np.sum(array)
+        # print('box has: {:.2f}% of light'.format(box_fraction * 100))
+
+        return box, box_fraction
+
 
 class RoboaoBrightStarPipeline(Pipeline):
     """
@@ -2018,13 +2338,41 @@ class RoboaoBrightStarPipeline(Pipeline):
 
             return go
 
+        # Preview generation for the results of BSP processing?
+        elif part == 'bright_star_pipeline:preview':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # failed?
+            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] != 'failed'
+
+            # preview generated?
+            _preview_done = self.db_entry['pipelined'][self.name]['preview']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            go = _pipe_done and ((not _preview_done) or _outdated)
+
+            return go
+
         # Strehl calculation for the results of BSP processing?
         elif part == 'bright_star_pipeline:strehl':
 
             return False
 
+        elif part == 'bright_star_pipeline:strehl:preview':
+
+            return False
+
         # Run PCA high-contrast processing pipeline?
         elif part == 'bright_star_pipeline:pca':
+
+            return False
+
+        elif part == 'bright_star_pipeline:pca:preview':
 
             return False
 
@@ -2131,6 +2479,120 @@ class RoboaoBrightStarPipeline(Pipeline):
                 else:
                     f_out_settings.write(l)
 
+    @staticmethod
+    def preview(_path_out, _obs, preview_img, preview_img_cropped,
+                SR=None, _fow_x=36, _pix_x=1024, _drizzled=True,
+                _x=None, _y=None, objects=None):
+        """
+        :param _path_out:
+        :param preview_img:
+        :param preview_img_cropped:
+        :param SR:
+        :param _x: cropped image will be centered around these _x
+        :param _y: and _y + a box will be drawn on full image around this position
+        :param objects: np.array([[x_0,y_0], ..., [x_N,y_N]])
+        :return:
+        """
+        from matplotlib.patches import Rectangle
+        import matplotlib.pyplot as plt
+
+        ''' full image '''
+        plt.close('all')
+        fig = plt.figure()
+        fig.set_size_inches(4, 4, forward=False)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
+        # plot detected objects:
+        if objects is not None:
+            ax.plot(objects[:, 0] - 1, objects[:, 1] - 1, 'o',
+                    markeredgewidth=1, markerfacecolor='None', markeredgecolor=plt.cm.Oranges(0.8))
+        # ax.imshow(preview_img, cmap='gray', origin='lower', interpolation='nearest')
+        ax.imshow(preview_img, cmap=plt.cm.magma, origin='lower', interpolation='nearest')
+        # plot a box around the cropped object
+        if _x is not None and _y is not None:
+            _h = int(preview_img_cropped.shape[0])
+            _w = int(preview_img_cropped.shape[1])
+            ax.add_patch(Rectangle((_y - _w / 2, _x - _h / 2), _w, _h,
+                                   fill=False, edgecolor='#f3f3f3', linestyle='dotted'))
+        # ax.imshow(preview_img, cmap='gist_heat', origin='lower', interpolation='nearest')
+        # plt.axis('off')
+        plt.grid('off')
+
+        # save full figure
+        fname_full = '{:s}_full.png'.format(_obs)
+        if not (os.path.exists(_path_out)):
+            os.makedirs(_path_out)
+        plt.savefig(os.path.join(_path_out, fname_full), dpi=300)
+
+        ''' cropped image: '''
+        # save cropped image
+        plt.close('all')
+        fig = plt.figure()
+        fig.set_size_inches(3, 3, forward=False)
+        # ax = fig.add_subplot(111)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
+        ax.imshow(preview_img_cropped, cmap=plt.cm.magma, origin='lower', interpolation='nearest')
+        # add scale bar:
+        # draw a horizontal bar with length of 0.1*x_size
+        # (ax.transData) with a label underneath.
+        bar_len = preview_img_cropped.shape[0] * 0.1
+        mltplr = 2 if _drizzled else 1
+        bar_len_str = '{:.1f}'.format(bar_len * _fow_x / _pix_x / mltplr)
+        asb = AnchoredSizeBar(ax.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax.add_artist(asb)
+        # add Strehl ratio
+        if SR is not None:
+            asb2 = AnchoredSizeBar(ax.transData,
+                                   0,
+                                   'Strehl: {:.2f}%'.format(float(SR)),
+                                   loc=2, pad=0.3, borderpad=0.4, sep=5, frameon=False)
+            ax.add_artist(asb2)
+            # asb3 = AnchoredSizeBar(ax.transData,
+            #                        0,
+            #                        'SR: {:.2f}%'.format(float(SR)),
+            #                        loc=3, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+            # ax.add_artist(asb3)
+
+        # save cropped figure
+        fname_cropped = '{:s}_cropped.png'.format(_obs)
+        if not (os.path.exists(_path_out)):
+            os.makedirs(_path_out)
+        fig.savefig(os.path.join(_path_out, fname_cropped), dpi=300)
+
+    def generate_preview(self, f_fits, path_obs, path_out):
+        # load first image frame from the fits file
+        preview_img = np.nan_to_num(load_fits(f_fits))
+        # scale with local contrast optimization for preview:
+        preview_img = self.scale_image(preview_img, correction='local')
+        # cropped image [_win=None to try to detect]
+        preview_img_cropped, _x, _y = self.trim_frame(_path=path_obs,
+                                                      _fits_name=os.path.split(f_fits)[1],
+                                                      _win=None, _method='pipeline_settings.txt',
+                                                      _x=None, _y=None, _drizzled=True)
+
+        # Strehl ratio (if available, otherwise will be None)
+        SR = self.db_entry['pipelined'][self.name]['strehl']['ratio_percent']
+
+        fits_header = get_fits_header(f_fits)
+        try:
+            # _pix_x = int(re.search(r'(:)(\d+)',
+            #                        _select['pipelined'][_pipe]['fits_header']['DETSIZE'][0]).group(2))
+            _pix_x = int(re.search(r'(:)(\d+)', fits_header['DETSIZE'][0]).group(2))
+        except KeyError:
+            # this should be there, even if it's sum.fits
+            _pix_x = int(fits_header['NAXIS1'][0])
+
+        self.preview(path_out, self.db_entry['_id'], preview_img, preview_img_cropped,
+                     SR, _fow_x=self.config['telescope']['KittPeak']['fov_x'],
+                     _pix_x=_pix_x, _drizzled=True,
+                     _x=_x, _y=_y)
+
     def run(self, part=None):
         """
             Execute specific part of pipeline
@@ -2146,7 +2608,7 @@ class RoboaoBrightStarPipeline(Pipeline):
         _path_tmp = self.config['path']['path_tmp']
         # path to raw files:
         _path_raw = os.path.join(self.db_entry['raw_data']['location'][1], _date)
-        # path to lucky-pipelined data:
+        # path to archive:
         _path_archive = os.path.join(self.config['path']['path_archive'], _date)
         # path to calibration data produced by lucky pipeline:
         _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
@@ -2345,33 +2807,46 @@ class RoboaoBrightStarPipeline(Pipeline):
                     self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
                     self.db_entry['pipelined'][self.name]['status']['retries'] += 1
 
-                    # set last_modified as out_dir folder modified date:
-                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(out_dir).st_mtime)
+                    # set last_modified as 100p.fits modified date:
+                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir, '100p.fits')).st_mtime)
                     self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
                 for _file in raws:
                     print('removing', _file)
                     os.remove(os.path.join(_file))
 
+        elif part == 'bright_star_pipeline:preview':
+            # generate previews
+            path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+            f_fits = os.path.join(path_obs, '100p.fits')
+            path_out = os.path.join(path_obs, 'preview')
+            self.generate_preview(f_fits=f_fits, path_obs=path_obs, path_out=path_out)
+
         elif part == 'bright_star_pipeline:strehl':
             # compute strehl
+            pass
 
-            return {'status': 'ok', 'message': None}
+        elif part == 'bright_star_pipeline:strehl:preview':
+            # generate previews with strehl imprinted
+            pass
 
         elif part == 'bright_star_pipeline:pca':
             # run high-contrast pipeline
+            pass
 
-            return {'status': 'ok', 'message': None}
+        elif part == 'bright_star_pipeline:pca:preview':
+            # generate previews for high-contrast pipeline
+            pass
 
         else:
-            return {'status': 'error', 'message': 'unknown pipeline part'}
+            raise RuntimeError('unknown pipeline part')
 
 
 def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=None):
     try:
         # init pipe here again. [as it's not JSON serializable]
         pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
-        # TODO: run the pipeline
+        # run the pipeline
         pip.run(part='bright_star_pipeline')
 
         return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
@@ -2395,6 +2870,45 @@ def job_bright_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=
         _status['status']['retries'] += 1
         _status['status']['enqueued'] = False
         _status['status']['force_redo'] = False
+        _status['status']['done'] = False
+        _status['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': _status
+                                     }}
+                                     )
+                }
+
+
+def job_bright_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
+        pip.run(part='bright_star_pipeline:preview')
+
+        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['bright_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoBrightStarPipeline.init_status()
+        # retries++
+        _status['preview']['retries'] += 1
+        _status['preview']['done'] = False
+        _status['preview']['force_redo'] = False
         _status['last_modified'] = utc_now()
         return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),

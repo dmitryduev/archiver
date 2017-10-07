@@ -79,6 +79,41 @@
       "loop_interval": "interval [minutes] to rerun the archiver if not nap time"
     }
   },
+  "telescope": {
+    "Palomar": {
+      "fov_x": 44,
+      "fov_y": 44,
+      "scale": 0.043,
+      "scale_red": 0.0215,
+      "scale_IR": 0.0794,
+      "D1": 1.524,
+      "D2": 0.578,
+      "Strehl_factor": {
+        "Sg": [0.0751567096096, 0.00208455630771],
+        "Sr": [0.0448855015043, 0.000718057921982],
+        "Si": [0.0301304974759, 0.000318888753944],
+        "Sz": [0.0220061273615, 0.000168553937903],
+        "lp600": [0.033937930236, 0.000422911250255]
+      }
+    },
+    "KittPeak": {
+      "fov_x": 36,
+      "fov_y": 36,
+      "scale": 0.0351594,
+      "scale_red": 0.0175797,
+      "scale_IR": null,
+      "D1": 1.85,
+      "D2": 0.879,
+      "Strehl_factor": {
+        "Sg": [0.0650379861553, 0.00195904513521],
+        "Sr": [0.0393821289397, 0.00067801330536],
+        "Si": [0.0266019992502, 0.000301292354134],
+        "Sz": [0.0194992892766, 0.000159280151932],
+        "lp600": [0.0299002454758, 0.000399512263876],
+        "c": [0.0299002454758, 0.000399512263876]
+      }
+    }
+  },
   "pipeline": {
     "bright_star": {
       "pipeline_settings_template": "/Users/dmitryduev/_caltech/python/archiver/roboao/pipeline_settings.txt",
