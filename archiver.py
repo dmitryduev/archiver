@@ -2351,10 +2351,11 @@ class RoboaoBrightStarPipeline(Pipeline):
             _preview_done = self.db_entry['pipelined'][self.name]['preview']['done']
 
             # last_modified == pipe_last_modified?
-            _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
+            _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
-            go = _pipe_done and ((not _preview_done) or _outdated)
+            # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            go = (_pipe_done and not _pipe_failed) and ((not _preview_done) or _outdated)
 
             return go
 
