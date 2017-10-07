@@ -2821,6 +2821,9 @@ class RoboaoBrightStarPipeline(Pipeline):
             f_fits = os.path.join(path_obs, '100p.fits')
             path_out = os.path.join(path_obs, 'preview')
             self.generate_preview(f_fits=f_fits, path_obs=path_obs, path_out=path_out)
+            self.db_entry['pipelined'][self.name]['preview']['done'] = True
+            self.db_entry['pipelined'][self.name]['preview']['last_modified'] = \
+                self.db_entry['pipelined'][self.name]['last_modified']
 
         elif part == 'bright_star_pipeline:strehl':
             # compute strehl
