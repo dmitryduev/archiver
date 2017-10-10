@@ -22,7 +22,7 @@ import json
 import logging
 import collections
 import pymongo
-from bson import json_util
+from bson.json_util import loads, dumps
 import re
 from astropy.io import fits
 import pyprind
@@ -129,7 +129,7 @@ class Star(object):
             FWHM_x, FWHM_y = 2.3548 * sigma_x, 2.3548 * sigma_y
         return FWHM, FWHM_x, FWHM_y
 
-    @memoize
+    # @memoize
     def _fit_model(self):
         fit_p = fitting.LevMarLSQFitter()
         model = self._initialize_model()
@@ -304,6 +304,31 @@ def get_fits_header(fits_file):
             header[_entry[0]] = _entry[1:]
 
     return header
+
+
+def radec_str2rad(_ra_str, _dec_str):
+    """
+
+    :param _ra_str: 'H:M:S'
+    :param _dec_str: 'D:M:S'
+    :return: ra, dec in rad
+    """
+    # convert to rad:
+    _ra = list(map(float, _ra_str.split(':')))
+    _ra = (_ra[0] + _ra[1] / 60.0 + _ra[2] / 3600.0) * np.pi / 12.
+    _dec = list(map(float, _dec_str.split(':')))
+    _dec = (_dec[0] + _dec[1] / 60.0 + _dec[2] / 3600.0) * np.pi / 180.
+
+    return _ra, _dec
+
+
+def great_circle_distance(phi1, lambda1, phi2, lambda2):
+    # input: dec1, ra1, dec2, ra2
+    # this is much faster than astropy.coordinates.Skycoord.separation
+    delta_lambda = lambda2 - lambda1
+    return np.arctan2(np.sqrt((np.cos(phi2)*np.sin(delta_lambda))**2
+                              + (np.cos(phi1)*np.sin(phi2) - np.sin(phi1)*np.cos(phi2)*np.cos(delta_lambda))**2),
+                      np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(delta_lambda))
 
 
 def sigma_clip(x, sigma, niter):
@@ -662,7 +687,7 @@ class Archiver(object):
 
         :param argdict: json-dumped dictionary with (named) parameters for the task.
                         must contain 'task' key with the task name known to this helper function
-                json.dumps is used to convert the dict to a hashable type - string - so that
+                bson.dumps is used to convert the dict to a hashable type - string - so that
                 it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
                 used instead of regular queues to be able to check if a task has been enqueued already
         :return:
@@ -943,7 +968,7 @@ class RoboaoArchiver(Archiver):
         """
         try:
             # unpack jsonified dict representing task:
-            argdict = json.loads(argdict_and_hash[0], object_hook=json_util.object_hook)
+            argdict = loads(argdict_and_hash[0])
             # get task hash:
             _task_hash = argdict_and_hash[1]
 
@@ -1425,7 +1450,7 @@ class RoboaoArchiver(Archiver):
                                         # print(s['db_record_update'])
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected raw_data entry for {:s}'.format(obs))
-                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
+                                        self.logger.debug(dumps(s['db_record_update']))
                                     # something failed?
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking raw files failed: {:s}'.format(obs,
@@ -1446,7 +1471,7 @@ class RoboaoArchiver(Archiver):
                                     if s['status'] == 'ok' and s['message'] is not None:
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected DB entry for {:s}'.format(obs))
-                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
+                                        self.logger.debug(dumps(s['db_record_update']))
                                     # something failed?
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking DB entry failed: {:s}'.format(obs,
@@ -1469,9 +1494,9 @@ class RoboaoArchiver(Archiver):
                                     if pipe_task is not None:
                                         # print(pipe_task)
                                         # try enqueueing. self.task_hashes takes care of possible duplicates
-                                        # use json dumps to serialize input dictionary _task. this way,
+                                        # use bson dumps to serialize input dictionary _task. this way,
                                         # it may be pickled and enqueued (and also hashed):
-                                        pipe_task_hashable = json.dumps(pipe_task, default=json_util.default)
+                                        pipe_task_hashable = dumps(pipe_task)
 
                                         # compute hash for task:
                                         pipe_task_hash = self.hash_task(pipe_task_hashable)
@@ -1501,7 +1526,7 @@ class RoboaoArchiver(Archiver):
                                     if s['status'] == 'ok' and s['message'] is not None:
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('updated distribution status for {:s}'.format(obs))
-                                        self.logger.debug(json.dumps(s['db_record_update'], default=json_util.default))
+                                        self.logger.debug(dumps(s['db_record_update']))
                                     # something failed?
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking distribution status failed: {:s}'.format(obs,
@@ -2064,6 +2089,10 @@ class RoboaoObservation(Observation):
                 return {'status': 'error', 'message': 'raw files for {:s} not available any more'.format(self.id),
                         'db_record_update': ({'_id': self.id},
                                              {'$set': {
+                                                 # 'exposure': None,
+                                                 # 'magnitude': None,
+                                                 # 'fits_header': {},
+                                                 # 'coordinates': {},
                                                  'raw_data.location': [],
                                                  'raw_data.data': [],
                                                  'raw_data.last_modified': self.db_entry['raw_data']['last_modified']
@@ -2084,11 +2113,85 @@ class RoboaoObservation(Observation):
                                                             _location]
                 self.db_entry['raw_data']['data'] = sorted(_raws)
                 self.db_entry['raw_data']['last_modified'] = time_tag
+
+                # additionally, fetch FITS header and parse some info from there
+                # grab header from the last file, as it's usually the smallest.
+                fits_header = get_fits_header(os.path.join(self.db_entry['raw_data']['location'][1],
+                                                           self.db_entry['date_utc'].strftime('%Y%m%d'),
+                                                           self.db_entry['raw_data']['data'][-1]))
+                # save fits header
+                self.db_entry['fits_header'] = fits_header
+
+                # separately, parse exposure and magnitude
+                self.db_entry['exposure'] = float(fits_header['EXPOSURE'][0]) if ('EXPOSURE' in fits_header) else None
+                self.db_entry['magnitude'] = float(fits_header['MAGNITUD'][0]) if ('MAGNITUD' in fits_header) else None
+
+                # Get and parse coordinates
+                _ra_str = fits_header['TELRA'][0] if 'TELRA' in fits_header else None
+                _objra = fits_header['OBJRA'][0] if 'OBJRA' in fits_header else None
+                if _objra is not None:
+                    for letter in ('h, m'):
+                        _objra = _objra.replace(letter, ':')
+                    _objra = _objra[:-1]
+                # print(_objra)
+                # TELRA not available? try replacing with OBJRA:
+                if _ra_str is None:
+                    _ra_str = _objra
+
+                _dec_str = fits_header['TELDEC'][0] if 'TELDEC' in fits_header else None
+                _objdec = fits_header['OBJDEC'][0] if 'OBJDEC' in fits_header else None
+                if _objdec is not None:
+                    for letter in ('d, m'):
+                        _objdec = _objdec.replace(letter, ':')
+                    _objdec = _objdec[:-1]
+                # print(_objdec)
+                # TELDEC not available? try replacing with OBJDEC:
+                if _dec_str is None:
+                    _dec_str = _objdec
+
+                _az_str = str(fits_header['AZIMUTH'][0]) if 'AZIMUTH' in fits_header else None
+                _el_str = str(fits_header['ELVATION'][0]) if 'ELVATION' in fits_header else None
+                _epoch = float(fits_header['EQUINOX'][0]) if 'EQUINOX' in fits_header else 2000.0
+
+                if None in (_ra_str, _dec_str):
+                    _azel = None
+                    _radec = None
+                    _radec_str = None
+                    _radec_deg = None
+                else:
+                    if not ('9999' in _ra_str or '9999' in _dec_str):
+                        # string format: H:M:S, D:M:S
+                        _radec_str = [_ra_str, _dec_str]
+                        # the rest are floats [rad]
+                        _ra, _dec = radec_str2rad(_ra_str, _dec_str)
+                        _radec = [_ra, _dec]
+                        # for GeoJSON, must be lon:[-180, 180], lat:[-90, 90] (i.e. in deg)
+                        _radec_deg = [_ra * 180.0 / np.pi - 180.0, _dec * 180.0 / np.pi]
+                        if (None not in (_az_str, _el_str)) and ('9999' not in (_az_str, _el_str)):
+                            _azel = [float(_az_str) * np.pi / 180., float(_el_str) * np.pi / 180.]
+                        else:
+                            _azel = None
+                    else:
+                        _azel = None
+                        _radec = None
+                        _radec_str = None
+                        _radec_deg = None
+
+                self.db_entry['coordinates']['epoch'] = _epoch
+                self.db_entry['coordinates']['radec_str'] = _radec_str
+                self.db_entry['coordinates']['radec_geojson'] = {'type': 'Point', 'coordinates': _radec_deg}
+                self.db_entry['coordinates']['radec'] = _radec
+                self.db_entry['coordinates']['azel'] = _azel
+
                 # DB updates are handled by the main archiver process
                 # we'll provide it with proper query to feed into pymongo's update_one()
                 return {'status': 'ok', 'message': 'raw files changed',
                         'db_record_update': ({'_id': self.id},
                                              {'$set': {
+                                                    'exposure': self.db_entry['exposure'],
+                                                    'magnitude': self.db_entry['magnitude'],
+                                                    'fits_header': self.db_entry['fits_header'],
+                                                    'coordinates': self.db_entry['coordinates'],
                                                     'raw_data.location': self.db_entry['raw_data']['location'],
                                                     'raw_data.data': self.db_entry['raw_data']['data'],
                                                     'raw_data.last_modified': time_tag
@@ -2113,8 +2216,6 @@ class RoboaoObservation(Observation):
     def parse(self, _program_pi):
         """
             Parse obs info (e.g. contained in id, or fits header) to be injected into DB
-            Define decision chain for observation pipelining, i.e. decide what _should_ be done
-            without actually checking what's already done
 
         :param _program_pi: dict program_num -> PI
 
@@ -2148,9 +2249,6 @@ class RoboaoObservation(Observation):
         else:
             _telescope = 'Palomar_P60'
 
-        # TODO: Get coordinates from raw FITS header
-        # TODO: check exposure and magnitude as well
-
         return {
             'science_program': {
                 'program_id': _prog_num,
@@ -2166,7 +2264,7 @@ class RoboaoObservation(Observation):
 
     def init_db_entry(self):
         """
-                A dummy database record for a science observation
+                An empty database record for a science observation
             :return:
             """
         time_now_utc = utc_now()
@@ -2189,9 +2287,11 @@ class RoboaoObservation(Observation):
                 'epoch': None,
                 'radec': None,
                 'radec_str': None,
-                # 'radec_geojson': None,
+                # 'radec_geojson': None,  # don't init, that spoils indexing; just ignore
                 'azel': None
             },
+            'fits_header': {},
+
             'pipelined': {},
 
             'seeing': {
@@ -2270,8 +2370,11 @@ class RoboaoPipeline(Pipeline):
         super(RoboaoPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
 
         ''' figure out where we are '''
-        self.telescope = 'KittPeak' if datetime.datetime.strptime(self.db_entry['date_utc'], '%Y%m%d') > \
-                                       datetime.datetime(2015, 9, 1) else 'Palomar'
+        # TODO: move to config.json
+        if self.db_entry['date_utc'].replace(tzinfo=pytz.utc) > datetime.datetime(2015, 9, 1).replace(tzinfo=pytz.utc):
+            self.telescope = 'KPNO_2.1m'
+        else:
+            self.telescope = 'Palomar_P60'
 
     def check_necessary_conditions(self):
         """
@@ -2635,8 +2738,8 @@ class RoboaoPipeline(Pipeline):
 
         # Icy, Icx = numpy.unravel_index(p.argmax(), p.shape)
 
-        for x in range(p.shape[1] / 2 - 20, p.shape[1] / 2 + 20 + 1):
-            for y in range(p.shape[0] / 2 - 20, p.shape[0] / 2 + 20 + 1):
+        for x in range(p.shape[1] // 2 - 20, p.shape[1] // 2 + 20 + 1):
+            for y in range(p.shape[0] // 2 - 20, p.shape[0] // 2 + 20 + 1):
                 r = np.sqrt((x - p.shape[1] / 2) ** 2 + (y - p.shape[0] / 2) ** 2)
                 if r > 3:  # remove core
                     pix_rad.append(r)
@@ -2835,7 +2938,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _strehl_done = self.db_entry['pipelined'][self.name]['strehl']['status']['done']
 
             # last_modified == pipe_last_modified?
-            _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['status']['last_modified'] -
+            _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
             # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
@@ -2856,7 +2959,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _pca_done = self.db_entry['pipelined'][self.name]['pca']['status']['done']
 
             # last_modified == pipe_last_modified?
-            _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['status']['last_modified'] -
+            _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
             # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
@@ -2905,7 +3008,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             },
             'location': [],
             'classified_as': None,
-            'fits_header': {},
+
             'strehl': {
                 'status': {
                     'force_redo': False,
@@ -3004,7 +3107,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
         # Strehl ratio (if available, otherwise will be None)
         SR = self.db_entry['pipelined'][self.name]['strehl']['ratio_percent']
 
-        fits_header = get_fits_header(f_fits)
+        # fits_header = get_fits_header(f_fits)
+        fits_header = self.db_entry['fits_header']
         try:
             # _pix_x = int(re.search(r'(:)(\d+)',
             #                        _select['pipelined'][_pipe]['fits_header']['DETSIZE'][0]).group(2))
@@ -3225,8 +3329,6 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     f100p = os.path.join(out_dir, '100p.fits')
                     if os.path.exists(f100p):
                         self.db_entry['pipelined'][self.name]['status']['done'] = True
-                        # save fits header
-                        self.db_entry['pipelined'][self.name]['fits_header'] = get_fits_header(f100p)
                     else:
                         self.db_entry['pipelined'][self.name]['status']['done'] = False
                     self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
@@ -3294,29 +3396,29 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     format(x, y, core, halo, SR * 100, FWHM, flag)
                 _f.write(output_entry)
 
-            # # reduction successful? prepare db entry for update
-            # f100p = os.path.join(out_dir, '100p.fits')
-            # if os.path.exists(f100p):
-            #     self.db_entry['pipelined'][self.name]['status']['done'] = True
-            #     # save fits header
-            #     self.db_entry['pipelined'][self.name]['fits_header'] = get_fits_header(f100p)
-            # else:
-            #     self.db_entry['pipelined'][self.name]['status']['done'] = False
-            # self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
-            # self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
-            # self.db_entry['pipelined'][self.name]['status']['retries'] += 1
-            #
-            # # set last_modified as 100p.fits modified date:
-            # time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir, '100p.fits')).st_mtime)
-            # self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
+            # reduction successful? prepare db entry for update
+            self.db_entry['pipelined'][self.name]['strehl']['status']['done'] = True
+            self.db_entry['pipelined'][self.name]['strehl']['status']['enqueued'] = False
+            self.db_entry['pipelined'][self.name]['strehl']['status']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['strehl']['status']['retries'] += 1
+            # set last_modified as for the pipe itself:
+            self.db_entry['pipelined'][self.name]['strehl']['last_modified'] = \
+                self.db_entry['pipelined'][self.name]['last_modified']
+
+            self.db_entry['pipelined'][self.name]['strehl']['lock_position'] = [x, y]
+            self.db_entry['pipelined'][self.name]['strehl']['ratio_percent'] = SR*100
+            self.db_entry['pipelined'][self.name]['strehl']['core_arcsec'] = core
+            self.db_entry['pipelined'][self.name]['strehl']['halo_arcsec'] = halo
+            self.db_entry['pipelined'][self.name]['strehl']['fwhm_arcsec'] = FWHM
+            self.db_entry['pipelined'][self.name]['strehl']['flag'] = flag
 
         elif part == 'bright_star_pipeline:pca':
             # run high-contrast pipeline
-            pass
+            raise NotImplementedError
 
         elif part == 'bright_star_pipeline:pca:preview':
             # generate previews for high-contrast pipeline
-            pass
+            raise NotImplementedError
 
         else:
             raise RuntimeError('unknown pipeline part')
@@ -3372,7 +3474,8 @@ def job_bright_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _ta
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                         'pipelined.bright_star.preview':
+                                             pip.db_entry['pipelined']['bright_star']['preview']
                                      }}
                                      )
                 }
@@ -3394,7 +3497,7 @@ def job_bright_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _ta
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': _status
+                                         'pipelined.bright_star.preview': _status['preview']
                                      }}
                                      )
                 }
@@ -3410,30 +3513,30 @@ def job_bright_star_pipeline_strehl(_id=None, _config=None, _db_entry=None, _tas
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                         'pipelined.bright_star.strehl':
+                                             pip.db_entry['pipelined']['bright_star']['strehl']
                                      }}
                                      )
                 }
     except Exception as _e:
         traceback.print_exc()
         try:
-            _status = _db_entry['pipelined']['bright_star']
+            _retries = _db_entry['pipelined']['bright_star']['strehl']['status']['retries']
         except Exception as _ee:
             print(str(_ee))
             traceback.print_exc()
-            # failed? flush status:
-            _status = RoboaoBrightStarPipeline.init_status()
+            # failed? something must have gone terribly wrong
+            _retries = 100
+        # flush status:
+        _status = RoboaoBrightStarPipeline.init_status()
         # retries++
-        _status['strehl']['status']['retries'] += 1
-        _status['strehl']['status']['done'] = False
-        _status['strehl']['status']['enqueued'] = False
-        _status['strehl']['status']['force_redo'] = False
+        _status['strehl']['status']['retries'] = _retries + 1
         _status['strehl']['last_modified'] = utc_now()
         return {'_id': _id, 'job': 'bright_star_pipeline:strehl', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': _status
+                                         'pipelined.bright_star.strehl': _status['strehl']
                                      }}
                                      )
                 }
@@ -3449,30 +3552,29 @@ def job_bright_star_pipeline_pca(_id=None, _config=None, _db_entry=None, _task_h
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                         'pipelined.bright_star.pca': pip.db_entry['pipelined']['bright_star']['pca']
                                      }}
                                      )
                 }
     except Exception as _e:
         traceback.print_exc()
         try:
-            _status = _db_entry['pipelined']['bright_star']
+            _retries = _db_entry['pipelined']['bright_star']['pca']['status']['retries']
         except Exception as _ee:
             print(str(_ee))
             traceback.print_exc()
-            # failed? flush status:
-            _status = RoboaoBrightStarPipeline.init_status()
+            # failed? something must have gone terribly wrong
+            _retries = 100
+        # flush status:
+        _status = RoboaoBrightStarPipeline.init_status()
         # retries++
-        _status['pca']['status']['retries'] += 1
-        _status['pca']['status']['done'] = False
-        _status['pca']['status']['enqueued'] = False
-        _status['pca']['status']['force_redo'] = False
+        _status['pca']['status']['retries'] = _retries + 1
         _status['pca']['last_modified'] = utc_now()
         return {'_id': _id, 'job': 'bright_star_pipeline:pca', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': _status
+                                         'pipelined.bright_star.pca': _status['pca']
                                      }}
                                      )
                 }
@@ -3488,7 +3590,8 @@ def job_bright_star_pipeline_pca_preview(_id=None, _config=None, _db_entry=None,
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                         'pipelined.bright_star.pca.preview':
+                                             pip.db_entry['pipelined']['bright_star']['pca']['preview']
                                      }}
                                      )
                 }
@@ -3506,11 +3609,11 @@ def job_bright_star_pipeline_pca_preview(_id=None, _config=None, _db_entry=None,
         _status['pca']['preview']['done'] = False
         _status['pca']['preview']['force_redo'] = False
         _status['pca']['preview']['last_modified'] = utc_now()
-        return {'_id': _id, 'job': 'bright_star_pipeline:pca', 'hash': _task_hash,
+        return {'_id': _id, 'job': 'bright_star_pipeline:pca:preview', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
-                                         'pipelined.bright_star': _status
+                                         'pipelined.bright_star.pca.preview': _status['pca']['preview']
                                      }}
                                      )
                 }

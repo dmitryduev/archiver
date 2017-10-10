@@ -63,7 +63,7 @@
   },
 
   "misc": {
-    "archiving_start_date": "2016/03/05",
+    "archiving_start_date": "2017/03/01",
     "max_retries": 20,
     "logging_level": "debug",
     "nap_at_night": false,
@@ -86,7 +86,7 @@
   },
 
   "telescope": {
-    "Palomar": {
+    "Palomar_P60": {
       "fov_x": 44,
       "fov_y": 44,
       "scale": 0.043,
@@ -102,7 +102,7 @@
         "lp600": [0.033937930236, 0.000422911250255]
       }
     },
-    "KittPeak": {
+    "KPNO_2.1m": {
       "fov_x": 36,
       "fov_y": 36,
       "scale": 0.0351594,
