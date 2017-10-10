@@ -12,6 +12,7 @@
       "environment": "'test' or 'production'"
     }
   },
+
   "path": {
     "path_logs": "/Users/dmitryduev/_caltech/python/archiver/logs/",
     "path_raw": ["/Users/dmitryduev/_caltech/roboao/_nas_data/VIC_data/"],
@@ -25,6 +26,7 @@
       "path_tmp": "path to store temporary stuff"
     }
   },
+
   "database": {
     "host": "127.0.0.1",
     "port": 27017,
@@ -48,6 +50,7 @@
       "collection_pwd": "collection with user login/data access credentials"
     }
   },
+
   "parallel": {
     "n_workers": 4,
     "threads_per_worker": 1,
@@ -58,6 +61,7 @@
       "threads_per_worker": "number of threads per process"
     }
   },
+
   "misc": {
     "archiving_start_date": "2016/03/05",
     "max_retries": 20,
@@ -67,6 +71,7 @@
     "nap_time_start": "23:30",
     "nap_time_stop": "04:00",
     "loop_interval": 0.2,
+
     "help": {
       "self": "miscellaneous stuff",
       "archiving_start_date": "only look at data starting from date YYYY/MM/DD",
@@ -79,6 +84,7 @@
       "loop_interval": "interval [minutes] to rerun the archiver if not nap time"
     }
   },
+
   "telescope": {
     "Palomar": {
       "fov_x": 44,
@@ -112,14 +118,20 @@
         "lp600": [0.0299002454758, 0.000399512263876],
         "c": [0.0299002454758, 0.000399512263876]
       }
+    },
+
+    "help": {
+      "self": "Telescope/camera data"
     }
   },
+
   "pipeline": {
     "bright_star": {
       "pipeline_settings_template": "/Users/dmitryduev/_caltech/python/archiver/roboao/pipeline_settings.txt",
       "pipeline_executable": "/Users/dmitryduev/_caltech/roboao/Pipeline/roboao_pipeline/image_reconstruction",
       "go": {
         "science_program.program_id": "not in [24]",
+
         "help": {
           "self": "describe necessary conditions for observations to be pushed through pipeline. key: valid DB field, value: valid python expression"
         }
@@ -134,7 +146,7 @@
         "help": {
           "self": "high contrast PCA pipeline",
           "path_psf_reference_library": "path to reference PSF library",
-          "win": "window size",
+          "win": "window size to cut around star, pix",
           "sigma": "sigma level",
           "nrefs": "number of reference PSFs to use",
           "klip": "number of principal components to keep"
@@ -143,17 +155,21 @@
       "strehl": {
         "core_min": 0.04,
         "halo_max": 1.0,
+        "win": 100,
 
         "help": {
           "self": "parameters for calculating/characterizing Strehl ratio",
           "core_min": "metrics [arcsec] to judge if an observation is good/bad: min core size",
-          "halo_max": "metrics [arcsec] to judge if an observation is good/bad: max halo size"
+          "halo_max": "metrics [arcsec] to judge if an observation is good/bad: max halo size",
+          "win": "box to cut around star side size, pix"
         }
       },
+
       "help": {
         "self": "bright star processing pipeline"
       }
     },
+
     "faint_star": {
       "win": 128,
       "n_threads": 4,
@@ -163,11 +179,13 @@
         "n_threads": "number of threads to use in fftw"
       }
     },
+
     "extended_object": {
       "help": {
         "self": "extended object processing pipeline"
       }
     },
+
     "help": {
       "self": "define pipeline parameters here"
     }

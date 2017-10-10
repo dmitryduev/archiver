@@ -12,7 +12,8 @@ import os
 import shutil
 import subprocess
 import numpy as np
-import scipy as sp
+from scipy.optimize import fmin
+from astropy.modeling import models, fitting
 import scipy.ndimage as ndimage
 import glob
 import traceback
@@ -70,6 +71,196 @@ class AnchoredSizeBar(AnchoredOffsetbox):
                                    child=self._box,
                                    prop=prop,
                                    frameon=frameon)
+
+
+class Star(object):
+    """ Define a star by its coordinates and modelled FWHM
+        Given the coordinates of a star within a 2D array, fit a model to the star and determine its
+        Full Width at Half Maximum (FWHM).The star will be modelled using astropy.modelling. Currently
+        accepted models are: 'Gaussian2D', 'Moffat2D'
+    """
+
+    _GAUSSIAN2D = 'Gaussian2D'
+    _MOFFAT2D = 'Moffat2D'
+    # _MODELS = set([_GAUSSIAN2D, _MOFFAT2D])
+
+    def __init__(self, x0, y0, data, model_type=_GAUSSIAN2D,
+                 box=100, plate_scale=0.0351594, exp=0.0, out_path='./'):
+        """ Instantiation method for the class Star.
+        The 2D array in which the star is located (data), together with the pixel coordinates (x0,y0) must be
+        passed to the instantiation method. .
+        """
+        self.x = x0
+        self.y = y0
+        self._box = box
+        # field of view in x in arcsec:
+        self._plate_scale = plate_scale
+        self._exp = exp
+        self._XGrid, self._YGrid = self._grid_around_star(x0, y0, data)
+        self.data = data[self._XGrid, self._YGrid]
+        self.model_type = model_type
+        self.out_path = out_path
+
+    def model(self):
+        """ Fit a model to the star. """
+        return self._fit_model()
+
+    @property
+    def model_psf(self):
+        """ Return a modelled PSF for the given model  """
+        return self.model()(self._XGrid, self._YGrid)
+
+    @property
+    def fwhm(self):
+        """ Extract the FWHM from the model of the star.
+            The FWHM needs to be calculated for each model. For the Moffat, the FWHM is a function of the gamma and
+            alpha parameters (in other words, the scaling factor and the exponent of the expression), while for a
+            Gaussian FWHM = 2.3548 * sigma. Unfortunately, our case is a 2D Gaussian, so a compromise between the
+            two sigmas (sigma_x, sigma_y) must be reached. We will use the average of the two.
+        """
+        model_dict = dict(zip(self.model().param_names, self.model().parameters))
+        if self.model_type == self._MOFFAT2D:
+            gamma, alpha = [model_dict[ii] for ii in ("gamma_0", "alpha_0")]
+            FWHM = 2. * gamma * np.sqrt(2 ** (1/alpha) - 1)
+            FWHM_x, FWHM_y = None, None
+        elif self.model_type == self._GAUSSIAN2D:
+            sigma_x, sigma_y = [model_dict[ii] for ii in ("x_stddev_0", "y_stddev_0")]
+            FWHM = 2.3548 * np.mean([sigma_x, sigma_y])
+            FWHM_x, FWHM_y = 2.3548 * sigma_x, 2.3548 * sigma_y
+        return FWHM, FWHM_x, FWHM_y
+
+    @memoize
+    def _fit_model(self):
+        fit_p = fitting.LevMarLSQFitter()
+        model = self._initialize_model()
+        _p = fit_p(model, self._XGrid, self._YGrid, self.data)
+        return _p
+
+    def _initialize_model(self):
+        """ Initialize a model with first guesses for the parameters.
+        The user can select between several astropy models, e.g., 'Gaussian2D', 'Moffat2D'. We will use the data to get
+        the first estimates of the parameters of each model. Finally, a Constant2D model is added to account for the
+        background or sky level around the star.
+        """
+        max_value = self.data.max()
+
+        if self.model_type == self._GAUSSIAN2D:
+            model = models.Gaussian2D(x_mean=self.x, y_mean=self.y, x_stddev=1, y_stddev=1)
+            model.amplitude = max_value
+
+            # Establish reasonable bounds for the fitted parameters
+            model.x_stddev.bounds = (0, self._box/4)
+            model.y_stddev.bounds = (0, self._box/4)
+            model.x_mean.bounds = (self.x - 5, self.x + 5)
+            model.y_mean.bounds = (self.y - 5, self.y + 5)
+
+        elif self.model_type == self._MOFFAT2D:
+            model = models.Moffat2D()
+            model.x_0 = self.x
+            model.y_0 = self.y
+            model.gamma = 2
+            model.alpha = 2
+            model.amplitude = max_value
+
+            #  Establish reasonable bounds for the fitted parameters
+            model.alpha.bounds = (1,6)
+            model.gamma.bounds = (0, self._box/4)
+            model.x_0.bounds = (self.x - 5, self.x + 5)
+            model.y_0.bounds = (self.y - 5, self.y + 5)
+
+        model += models.Const2D(self.fit_sky())
+        model.amplitude_1.fixed = True
+        return model
+
+    def fit_sky(self):
+        """ Fit the sky using a Ring2D model in which all parameters but the amplitude are fixed.
+        """
+        min_value = self.data.min()
+        ring_model = models.Ring2D(min_value, self.x, self.y, self._box * 0.4, width=self._box * 0.4)
+        ring_model.r_in.fixed = True
+        ring_model.width.fixed = True
+        ring_model.x_0.fixed = True
+        ring_model.y_0.fixed = True
+        fit_p = fitting.LevMarLSQFitter()
+        return fit_p(ring_model, self._XGrid, self._YGrid, self.data).amplitude
+
+    def _grid_around_star(self, x0, y0, data):
+        """ Build a grid of side 'box' centered in coordinates (x0,y0). """
+        lenx, leny = data.shape
+        xmin, xmax = max(x0-self._box/2, 0), min(x0+self._box/2+1, lenx-1)
+        ymin, ymax = max(y0-self._box/2, 0), min(y0+self._box/2+1, leny-1)
+        return np.mgrid[int(xmin):int(xmax), int(ymin):int(ymax)]
+
+    def plot_resulting_model(self, frame_name):
+        import matplotlib.pyplot as plt
+        """ Make a plot showing data, model and residuals. """
+        data = self.data
+        model = self.model()(self._XGrid, self._YGrid)
+        _residuals = data - model
+
+        bar_len = data.shape[0] * 0.1
+        bar_len_str = '{:.1f}'.format(bar_len * self._plate_scale)
+
+        plt.close('all')
+        fig = plt.figure(figsize=(9, 3))
+        # data
+        ax1 = fig.add_subplot(1, 3, 1)
+        # print(sns.diverging_palette(10, 220, sep=80, n=7))
+        ax1.imshow(data, origin='lower', interpolation='nearest',
+                   vmin=data.min(), vmax=data.max(), cmap=plt.cm.magma)
+        # ax1.title('Data', fontsize=14)
+        ax1.grid('off')
+        ax1.set_axis_off()
+        # ax1.text(0.1, 0.8,
+        #          'exposure: {:.0f} sec'.format(self._exp), color='0.75',
+        #          horizontalalignment='center', verticalalignment='center')
+
+        asb = AnchoredSizeBar(ax1.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax1.add_artist(asb)
+
+        # model
+        ax2 = fig.add_subplot(1, 3, 2, sharey=ax1)
+        ax2.imshow(model, origin='lower', interpolation='nearest',
+                   vmin=data.min(), vmax=data.max(), cmap=plt.cm.magma)
+        # RdBu_r, magma, inferno, viridis
+        ax2.set_axis_off()
+        # ax2.title('Model', fontsize=14)
+        ax2.grid('off')
+
+        asb = AnchoredSizeBar(ax2.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax2.add_artist(asb)
+
+        # residuals
+        ax3 = fig.add_subplot(1, 3, 3, sharey=ax1)
+        ax3.imshow(_residuals, origin='lower', interpolation='nearest', cmap=plt.cm.magma)
+        # ax3.title('Residuals', fontsize=14)
+        ax3.grid('off')
+        ax3.set_axis_off()
+
+        asb = AnchoredSizeBar(ax3.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax3.add_artist(asb)
+
+        # plt.tight_layout()
+
+        # dancing with a tambourine to remove the white spaces on the plot:
+        fig.subplots_adjust(wspace=0, hspace=0, top=1, bottom=0, right=1, left=0)
+        plt.margins(0, 0)
+        from matplotlib.ticker import NullLocator
+        plt.gca().xaxis.set_major_locator(NullLocator())
+        plt.gca().yaxis.set_major_locator(NullLocator())
+
+        if not os.path.exists(self.out_path):
+            os.makedirs(self.out_path)
+        fig.savefig(os.path.join(self.out_path, '{:s}.png'.format(frame_name)), dpi=200)
 
 
 def export_fits(path, _data, _header=None):
@@ -745,10 +936,9 @@ class RoboaoArchiver(Archiver):
             Helper function that maps over 'data'
 
         :param argdict: json-dumped dictionary with (named) parameters for the task.
-                        must contain 'task' key with the task name known to this helper function
-                json.dumps is used to convert the dict to a hashable type - string - so that
-                it can be used with SetQueue or OrderedSetQueue. the latter two are in turn
-                used instead of regular queues to be able to check if a task has been enqueued already
+                        must contain 'task' key with the task name known to this helper function.
+                        json.dumps is used to convert the dict to a hashable type - string - so that
+                        it can be serialized.
         :return:
         """
         try:
@@ -764,15 +954,21 @@ class RoboaoArchiver(Archiver):
                 result = job_bright_star_pipeline(_id=argdict['id'], _config=argdict['config'],
                                                   _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
+            elif argdict['task'] == 'bright_star_pipeline:strehl':
+                result = job_bright_star_pipeline_strehl(_id=argdict['id'], _config=argdict['config'],
+                                                         _db_entry=argdict['db_entry'], _task_hash=_task_hash)
+
             elif argdict['task'] == 'bright_star_pipeline:preview':
                 result = job_bright_star_pipeline_preview(_id=argdict['id'], _config=argdict['config'],
                                                           _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
-            elif argdict['task'] == 'bright_star_pipeline:strehl':
-                result = {'status': 'error', 'message': 'not implemented yet'}
-
             elif argdict['task'] == 'bright_star_pipeline:pca':
-                result = {'status': 'error', 'message': 'not implemented yet'}
+                result = job_bright_star_pipeline_pca(_id=argdict['id'], _config=argdict['config'],
+                                                      _db_entry=argdict['db_entry'], _task_hash=_task_hash)
+
+            elif argdict['task'] == 'bright_star_pipeline:pca:preview':
+                result = job_bright_star_pipeline_pca_preview(_id=argdict['id'], _config=argdict['config'],
+                                                              _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
             elif argdict['task'] == 'faint_star_pipeline':
                 result = {'status': 'error', 'message': 'not implemented yet'}
@@ -1766,12 +1962,12 @@ class RoboaoObservation(Observation):
         """
         _task = None
 
-        # TODO: BSP?
+        # BSP?
         ''' Bright star pipeline '''
         pipe = RoboaoBrightStarPipeline(_config=self.config, _db_entry=self.db_entry)
         # check conditions necessary to run (defined in config.json):
         go = pipe.check_necessary_conditions()
-        print(go)
+        # print('{:s} BSP go: '.format(self.id), go)
 
         # good to go?
         if go:
@@ -1779,8 +1975,26 @@ class RoboaoObservation(Observation):
             _part = 'bright_star_pipeline'
             go = pipe.check_conditions(part=_part)
             if go:
+                # mark enqueued
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['status']['enqueued'] = True
                 # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
+                return _task
+
+            # should and can run Strehl calculation?
+            _part = 'bright_star_pipeline:strehl'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                # mark enqueued
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['last_modified'] = utc_now()
                 _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
                          'db_record_update': ({'_id': self.id},
                                               {'$set': {
@@ -1794,37 +2008,16 @@ class RoboaoObservation(Observation):
             # should and can run preview generation for BSP pipeline itself?
             _part = 'bright_star_pipeline:preview'
             go = pipe.check_conditions(part=_part)
+            # print(self.id, _part, go)
             if go:
                 _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
                 return _task
-
-            # should and can run Strehl calculation?
-            _part = 'bright_star_pipeline:strehl'
-            go = pipe.check_conditions(part=_part)
-            if go:
-                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['status']['enqueued'] = True
-                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['last_modified'] = utc_now()
-                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
-                         'db_record_update': ({'_id': self.id},
-                                              {'$set': {
-                                                  'pipelined.{:s}'.format(pipe.name):
-                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
-                                              }}
-                                              )
-                         }
-                return _task
-
-            # should and can run preview generation after Strehl calculation?
-            # _part = 'bright_star_pipeline:strehl:preview'
-            # go = pipe.check_conditions(part=_part)
-            # if go:
-            #     _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
-            #     return _task
 
             # should and can run PCA pipeline?
             _part = 'bright_star_pipeline:pca'
             go = pipe.check_conditions(part=_part)
             if go:
+                # mark enqueued
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['status']['enqueued'] = True
                 # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['last_modified'] = utc_now()
                 _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
@@ -1838,11 +2031,11 @@ class RoboaoObservation(Observation):
                 return _task
 
             # should and can run preview generation for PCA results?
-            # _part = 'bright_star_pipeline:pca:preview'
-            # go = pipe.check_conditions(part=_part)
-            # if go:
-            #     _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
-            #     return _task
+            _part = 'bright_star_pipeline:pca:preview'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+                return _task
 
         # TODO: FSP?
 
@@ -1955,6 +2148,9 @@ class RoboaoObservation(Observation):
         else:
             _telescope = 'Palomar_P60'
 
+        # TODO: Get coordinates from raw FITS header
+        # TODO: check exposure and magnitude as well
+
         return {
             'science_program': {
                 'program_id': _prog_num,
@@ -2031,6 +2227,51 @@ class Pipeline(object):
         # self.name = None
         # this is what gets injected into DB
         # self.status = OrderedDict()
+
+    def check_necessary_conditions(self):
+        """
+            Check if should be run on an obs
+        :return:
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def init_status():
+        """
+            Initialize status dict
+        :return:
+        """
+        raise NotImplementedError
+
+    def run(self, part):
+        """
+            Run the pipeline
+            # :param aux: auxiliary data including calibration
+        :return:
+        """
+        raise NotImplementedError
+
+    def generate_preview(self, **kwargs):
+        """
+            Generate preview images
+        :return:
+        """
+        raise NotImplementedError
+
+
+class RoboaoPipeline(Pipeline):
+    def __init__(self, _config, _db_entry):
+        """
+            Pipeline
+        :param _config: dict with configuration
+        :param _db_entry: observation DB entry
+        """
+        ''' initialize super class '''
+        super(RoboaoPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
+
+        ''' figure out where we are '''
+        self.telescope = 'KittPeak' if datetime.datetime.strptime(self.db_entry['date_utc'], '%Y%m%d') > \
+                                       datetime.datetime(2015, 9, 1) else 'Palomar'
 
     def check_necessary_conditions(self):
         """
@@ -2274,212 +2515,6 @@ class Pipeline(object):
 
         return box, box_fraction
 
-
-class RoboaoBrightStarPipeline(Pipeline):
-    """
-        Robo-AO's Bright Star Pipeline
-    """
-    def __init__(self, _config, _db_entry):
-        """
-            Init Robo-AO's Bright Star Pipeline
-            :param _config: dict with configuration
-            :param _db_entry: observation DB entry
-        """
-        ''' initialize super class '''
-        super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
-
-        # pipeline name. This goes to 'pipelined' field of obs DB entry
-        self.name = 'bright_star'
-
-        # initialize status
-        if self.name not in self.db_entry['pipelined']:
-            self.db_entry['pipelined'][self.name] = self.init_status()
-
-    def check_necessary_conditions(self):
-        """
-            Check if should be run on an obs (if necessary conditions are met)
-            :param _db_entry: observation DB entry
-        :return:
-        """
-        go = True
-
-        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
-            if field_name != 'help':
-                # build proper dict reference expression
-                keys = field_name.split('.')
-                expr = 'self.db_entry'
-                for key in keys:
-                    expr += "['{:s}']".format(key)
-                # get condition
-                condition = eval(expr + ' ' + field_condition)
-                # eval condition
-                go = go and condition
-
-        return go
-
-    def check_conditions(self, part=None):
-        """
-            Perform condition checks for running specific parts of pipeline
-            :param part: which part of pipeline to run
-        :return:
-        """
-        assert part is not None, 'must specify what to check'
-
-        # check the BSP itself?
-        if part == 'bright_star_pipeline':
-            # force redo requested?
-            _force_redo = self.db_entry['pipelined'][self.name]['status']['force_redo']
-            # pipeline done?
-            _done = self.db_entry['pipelined'][self.name]['status']['done']
-            # how many times tried?
-            _num_tries = self.db_entry['pipelined'][self.name]['status']['retries']
-
-            go = _force_redo or ((not _done) and (_num_tries <= self.config['misc']['max_retries']))
-
-            return go
-
-        # Preview generation for the results of BSP processing?
-        elif part == 'bright_star_pipeline:preview':
-
-            # pipeline done?
-            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
-
-            # failed?
-            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] != 'failed'
-
-            # preview generated?
-            _preview_done = self.db_entry['pipelined'][self.name]['preview']['done']
-
-            # last_modified == pipe_last_modified?
-            _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
-                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
-
-            # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-            go = (_pipe_done and not _pipe_failed) and ((not _preview_done) or _outdated)
-
-            return go
-
-        # Strehl calculation for the results of BSP processing?
-        elif part == 'bright_star_pipeline:strehl':
-
-            return False
-
-        elif part == 'bright_star_pipeline:strehl:preview':
-
-            return False
-
-        # Run PCA high-contrast processing pipeline?
-        elif part == 'bright_star_pipeline:pca':
-
-            return False
-
-        elif part == 'bright_star_pipeline:pca:preview':
-
-            return False
-
-    @staticmethod
-    def init_status():
-        time_now_utc = utc_now()
-        return {
-            'status': {
-                'done': False,
-                'enqueued': False,
-                'force_redo': False,
-                'retries': 0,
-            },
-            'last_modified': time_now_utc,
-            'preview': {
-                'done': False,
-                'force_redo': False,
-                'retries': 0,
-                'last_modified': time_now_utc
-            },
-            'location': [],
-            'classified_as': None,
-            'fits_header': {},
-            'strehl': {
-                'status': {
-                    'force_redo': False,
-                    'enqueued': False,
-                    'done': False,
-                    'retries': 0
-                },
-                'lock_position': None,
-                'ratio_percent': None,
-                'core_arcsec': None,
-                'halo_arcsec': None,
-                'fwhm_arcsec': None,
-                'flag': None,
-                'last_modified': time_now_utc
-            },
-            'pca': {
-                'status': {
-                    'force_redo': False,
-                    'enqueued': False,
-                    'done': False,
-                    'retries': 0
-                },
-                'preview': {
-                    'force_redo': False,
-                    'done': False,
-                    'retries': 0
-                },
-                'location': [],
-                'lock_position': None,
-                'contrast_curve': None,
-                'last_modified': time_now_utc
-            }
-        }
-
-    def generate_lucky_settings_file(self, out_settings, _path_calib,
-                                     all_files, final_gs_x, final_gs_y, gs_diam,
-                                     final_bg_x, final_bg_y, bg_diam):
-        with open(out_settings, 'w') as f_out_settings:
-            settings_out_n = 0
-            for l in open(self.config['pipeline']['bright_star']['pipeline_settings_template'], 'r'):
-                if l.find("???") == 0:
-                    if settings_out_n == 0:
-                        file_n = 0
-                        for f in all_files:
-                            with fits.open(f) as _tmp:
-                                n_frames = len(_tmp)
-                            f_out_settings.write('{:<7d}{:s}    0-{:d}\n'.format(file_n, f, n_frames - 1))
-                            file_n += 1
-                        settings_out_n += 1
-                    elif settings_out_n == 1:
-                        for file_n, f in enumerate(all_files):
-                            f_out_settings.write('{:<8d}{:<8d}({:d},{:d}),({:d},{:d})\n'
-                                                 .format(file_n, 1,
-                                                         final_gs_x - gs_diam // 2, final_gs_y - gs_diam // 2,
-                                                         final_gs_x + gs_diam // 2, final_gs_y + gs_diam // 2))
-                        settings_out_n += 1
-                    elif settings_out_n == 2:
-                        for file_n, f in enumerate(all_files):
-                            f_out_settings.write('{:<8d}({:d},{:d}),({:d},{:d})\n'
-                                                 .format(file_n,
-                                                         final_bg_x - bg_diam // 2, final_bg_y - bg_diam // 2,
-                                                         final_bg_x + bg_diam // 2, final_bg_y + bg_diam // 2))
-                        settings_out_n += 1
-                    elif settings_out_n == 3:
-                        with fits.open(all_files[0]) as f_fits:
-                            camera_mode = f_fits[0].header['MODE_NUM']
-                            naxis1 = int(f_fits[0].header['NAXIS1'])
-                            if naxis1 == 256:
-                                camera_mode = repr(camera_mode) + '4'
-                            else:
-                                camera_mode = repr(camera_mode)
-                        f_out_settings.write('Bias file (filename/none)                  : ' +
-                                             os.path.join(_path_calib, 'dark_{:s}.fits\n'.format(camera_mode)))
-                        settings_out_n += 1
-                    elif settings_out_n == 4:
-                        f_out_settings.write('Flat (filename/none)                       : ' +
-                                             os.path.join(_path_calib,
-                                                          'flat_{:s}.fits\n'.format(self.db_entry['filter'])))
-                        settings_out_n += 1
-
-                else:
-                    f_out_settings.write(l)
-
     @staticmethod
     def preview(_path_out, _obs, preview_img, preview_img_cropped,
                 SR=None, _fow_x=36, _pix_x=1024, _drizzled=True,
@@ -2566,6 +2601,395 @@ class RoboaoBrightStarPipeline(Pipeline):
             os.makedirs(_path_out)
         fig.savefig(os.path.join(_path_out, fname_cropped), dpi=300)
 
+    @staticmethod
+    def gaussian(p, x):
+        return p[0] + p[1] * (np.exp(-x * x / (2.0 * p[2] * p[2])))
+
+    @staticmethod
+    def moffat(p, x):
+        base = 0.0
+        scale = p[1]
+        fwhm = p[2]
+        beta = p[3]
+
+        if np.power(2.0, (1.0 / beta)) > 1.0:
+            alpha = fwhm / (2.0 * np.sqrt(np.power(2.0, (1.0 / beta)) - 1.0))
+            return base + scale * np.power(1.0 + ((x / alpha) ** 2), -beta)
+        else:
+            return 1.0
+
+    @classmethod
+    def residuals(cls, p, x, y):
+        res = 0.0
+        for a, b in zip(x, y):
+            res += np.fabs(b - cls.moffat(p, a))
+
+        return res
+
+    @classmethod
+    def bad_obs_check(cls, p, return_halo=True, ps=0.0175797):
+        pix_rad = []
+        pix_vals = []
+        core_pix_rad = []
+        core_pix_vals = []
+
+        # Icy, Icx = numpy.unravel_index(p.argmax(), p.shape)
+
+        for x in range(p.shape[1] / 2 - 20, p.shape[1] / 2 + 20 + 1):
+            for y in range(p.shape[0] / 2 - 20, p.shape[0] / 2 + 20 + 1):
+                r = np.sqrt((x - p.shape[1] / 2) ** 2 + (y - p.shape[0] / 2) ** 2)
+                if r > 3:  # remove core
+                    pix_rad.append(r)
+                    pix_vals.append(p[y][x])
+                else:
+                    core_pix_rad.append(r)
+                    core_pix_vals.append(p[y][x])
+
+        try:
+            if return_halo:
+                p0 = [0.0, np.max(pix_vals), 20.0, 2.0]
+                p = fmin(cls.residuals, p0, args=(pix_rad, pix_vals), maxiter=1000, maxfun=1000,
+                         ftol=1e-3, xtol=1e-3, disp=False)
+
+            p0 = [0.0, np.max(core_pix_vals), 5.0, 2.0]
+            core_p = fmin(cls.residuals, p0, args=(core_pix_rad, core_pix_vals), maxiter=1000, maxfun=1000,
+                          ftol=1e-3, xtol=1e-3, disp=False)
+
+            # Palomar PS = 0.021, KP PS = 0.0175797
+            _core = core_p[2] * ps
+            if return_halo:
+                _halo = p[2] * ps
+                return _core, _halo
+            else:
+                return _core
+
+        except OverflowError:
+            _core = 0
+            _halo = 999
+
+            if return_halo:
+                return _core, _halo
+            else:
+                return _core
+
+    def Strehl_calculator(self, image_data, _Strehl_factor, _plate_scale, _boxsize):
+
+        """ Calculates the Strehl ratio of an image
+        Inputs:
+            - image_data: image data
+            - Strehl_factor: from model PSF
+            - boxsize: from model PSF
+            - plate_scale: plate scale of telescope in arcseconds/pixel
+        Output:
+            Strehl ratio (as a decimal)
+
+            """
+
+        ##################################################
+        # normalize real image PSF by the flux in some radius
+        ##################################################
+
+        ##################################################
+        #  Choose radius with 95-99% light in model PSF ##
+        ##################################################
+
+        # find peak image flux to center box around
+        peak_ind = np.where(image_data == np.max(image_data))
+        peak1, peak2 = peak_ind[0][0], peak_ind[1][0]
+        # print("max intensity =", np.max(image_data), "located at:", peak1, ",", peak2, "pixels")
+
+        # find array within desired radius
+        box_roboao, box_roboao_fraction = self.makebox(image_data, round(_boxsize / 2.), peak1, peak2)
+        # print("size of box", np.shape(box_roboao))
+
+        # sum the fluxes within the desired radius
+        total_box_flux = np.sum(box_roboao)
+        # print("total flux in box", total_box_flux)
+
+        # normalize real image PSF by the flux in some radius:
+        image_norm = image_data / total_box_flux
+
+        ########################
+        # divide normalized peak image flux by strehl factor
+        ########################
+
+        image_norm_peak = np.max(image_norm)
+        # print("normalized peak", image_norm_peak)
+
+        #####################################################
+        # ############# CALCULATE STREHL RATIO ##############
+        #####################################################
+        Strehl_ratio = image_norm_peak / _Strehl_factor
+        # print('\n----------------------------------')
+        # print("Strehl ratio", Strehl_ratio * 100, '%')
+        # print("----------------------------------")
+
+        max_inds = np.where(box_roboao == np.max(box_roboao))
+
+        centroid = Star(max_inds[0][0], max_inds[1][0], box_roboao)
+        FWHM, FWHM_x, FWHM_y = centroid.fwhm
+        fwhm_arcsec = FWHM * _plate_scale
+        # print(FWHM, FWHM_x, FWHM_y)
+        # print('image FWHM: {:.5f}\"\n'.format(fwhm_arcsec))
+
+        # model = centroid.model()(centroid._XGrid, centroid._YGrid)
+        # export_fits('1.fits', model)
+
+        return Strehl_ratio, fwhm_arcsec, box_roboao
+
+
+class RoboaoBrightStarPipeline(RoboaoPipeline):
+    """
+        Robo-AO's Bright Star Pipeline
+    """
+    def __init__(self, _config, _db_entry):
+        """
+            Init Robo-AO's Bright Star Pipeline
+            :param _config: dict with configuration
+            :param _db_entry: observation DB entry
+        """
+        ''' initialize super class '''
+        super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
+
+        # pipeline name. This goes to 'pipelined' field of obs DB entry
+        self.name = 'bright_star'
+
+        # initialize status
+        if self.name not in self.db_entry['pipelined']:
+            self.db_entry['pipelined'][self.name] = self.init_status()
+
+    def check_necessary_conditions(self):
+        """
+            Check if should be run on an obs (if necessary conditions are met)
+            :param _db_entry: observation DB entry
+        :return:
+        """
+        go = True
+
+        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
+            if field_name != 'help':
+                # build proper dict reference expression
+                keys = field_name.split('.')
+                expr = 'self.db_entry'
+                for key in keys:
+                    expr += "['{:s}']".format(key)
+                # get condition
+                condition = eval(expr + ' ' + field_condition)
+                # eval condition
+                go = go and condition
+
+        return go
+
+    def check_conditions(self, part=None):
+        """
+            Perform condition checks for running specific parts of pipeline
+            :param part: which part of pipeline to run
+        :return:
+        """
+        assert part is not None, 'must specify what to check'
+
+        # check the BSP itself?
+        if part == 'bright_star_pipeline':
+            # force redo requested?
+            _force_redo = self.db_entry['pipelined'][self.name]['status']['force_redo']
+            # pipeline done?
+            _done = self.db_entry['pipelined'][self.name]['status']['done']
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['status']['retries']
+
+            go = _force_redo or ((not _done) and (_num_tries <= self.config['misc']['max_retries']))
+
+            return go
+
+        # Preview generation for the results of BSP processing?
+        elif part == 'bright_star_pipeline:preview':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # failed?
+            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+
+            # preview generated?
+            _preview_done = self.db_entry['pipelined'][self.name]['preview']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            go = (_pipe_done and (not _pipe_failed)) and ((not _preview_done) or _outdated)
+
+            return go
+
+        # Strehl calculation for the results of BSP processing?
+        elif part == 'bright_star_pipeline:strehl':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # failed?
+            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+
+            # Strehl calculated?
+            _strehl_done = self.db_entry['pipelined'][self.name]['strehl']['status']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['status']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated)
+
+            return go
+
+        # Run PCA high-contrast processing pipeline?
+        elif part == 'bright_star_pipeline:pca':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # failed?
+            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+
+            # pca done?
+            _pca_done = self.db_entry['pipelined'][self.name]['pca']['status']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['status']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated)
+
+            return go
+
+        elif part == 'bright_star_pipeline:pca:preview':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # failed?
+            _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+
+            # pca done?
+            _pca_done = self.db_entry['pipelined'][self.name]['pca']['status']['done']
+
+            # pca preview done?
+            _pca_preview_done = self.db_entry['pipelined'][self.name]['pca']['preview']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated)
+
+            return go
+
+    @staticmethod
+    def init_status():
+        time_now_utc = utc_now()
+        return {
+            'status': {
+                'done': False,
+                'enqueued': False,
+                'force_redo': False,
+                'retries': 0,
+            },
+            'last_modified': time_now_utc,
+            'preview': {
+                'done': False,
+                'force_redo': False,
+                'retries': 0,
+                'last_modified': time_now_utc
+            },
+            'location': [],
+            'classified_as': None,
+            'fits_header': {},
+            'strehl': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'lock_position': None,
+                'ratio_percent': None,
+                'core_arcsec': None,
+                'halo_arcsec': None,
+                'fwhm_arcsec': None,
+                'flag': None,
+                'last_modified': time_now_utc
+            },
+            'pca': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'preview': {
+                    'force_redo': False,
+                    'done': False,
+                    'retries': 0,
+                    'last_modified': time_now_utc
+                },
+                'location': [],
+                'lock_position': None,
+                'contrast_curve': None,
+                'last_modified': time_now_utc
+            }
+        }
+
+    def generate_lucky_settings_file(self, out_settings, _path_calib,
+                                     all_files, final_gs_x, final_gs_y, gs_diam,
+                                     final_bg_x, final_bg_y, bg_diam):
+        with open(out_settings, 'w') as f_out_settings:
+            settings_out_n = 0
+            for l in open(self.config['pipeline']['bright_star']['pipeline_settings_template'], 'r'):
+                if l.find("???") == 0:
+                    if settings_out_n == 0:
+                        file_n = 0
+                        for f in all_files:
+                            with fits.open(f) as _tmp:
+                                n_frames = len(_tmp)
+                            f_out_settings.write('{:<7d}{:s}    0-{:d}\n'.format(file_n, f, n_frames - 1))
+                            file_n += 1
+                        settings_out_n += 1
+                    elif settings_out_n == 1:
+                        for file_n, f in enumerate(all_files):
+                            f_out_settings.write('{:<8d}{:<8d}({:d},{:d}),({:d},{:d})\n'
+                                                 .format(file_n, 1,
+                                                         final_gs_x - gs_diam // 2, final_gs_y - gs_diam // 2,
+                                                         final_gs_x + gs_diam // 2, final_gs_y + gs_diam // 2))
+                        settings_out_n += 1
+                    elif settings_out_n == 2:
+                        for file_n, f in enumerate(all_files):
+                            f_out_settings.write('{:<8d}({:d},{:d}),({:d},{:d})\n'
+                                                 .format(file_n,
+                                                         final_bg_x - bg_diam // 2, final_bg_y - bg_diam // 2,
+                                                         final_bg_x + bg_diam // 2, final_bg_y + bg_diam // 2))
+                        settings_out_n += 1
+                    elif settings_out_n == 3:
+                        with fits.open(all_files[0]) as f_fits:
+                            camera_mode = f_fits[0].header['MODE_NUM']
+                            naxis1 = int(f_fits[0].header['NAXIS1'])
+                            if naxis1 == 256:
+                                camera_mode = repr(camera_mode) + '4'
+                            else:
+                                camera_mode = repr(camera_mode)
+                        f_out_settings.write('Bias file (filename/none)                  : ' +
+                                             os.path.join(_path_calib, 'dark_{:s}.fits\n'.format(camera_mode)))
+                        settings_out_n += 1
+                    elif settings_out_n == 4:
+                        f_out_settings.write('Flat (filename/none)                       : ' +
+                                             os.path.join(_path_calib,
+                                                          'flat_{:s}.fits\n'.format(self.db_entry['filter'])))
+                        settings_out_n += 1
+
+                else:
+                    f_out_settings.write(l)
+
     def generate_preview(self, f_fits, path_obs, path_out):
         # load first image frame from the fits file
         preview_img = np.nan_to_num(load_fits(f_fits))
@@ -2590,13 +3014,14 @@ class RoboaoBrightStarPipeline(Pipeline):
             _pix_x = int(fits_header['NAXIS1'][0])
 
         self.preview(path_out, self.db_entry['_id'], preview_img, preview_img_cropped,
-                     SR, _fow_x=self.config['telescope']['KittPeak']['fov_x'],
+                     SR, _fow_x=self.config['telescope'][self.telescope]['fov_x'],
                      _pix_x=_pix_x, _drizzled=True,
                      _x=_x, _y=_y)
 
     def run(self, part=None):
         """
-            Execute specific part of pipeline
+            Execute specific part of pipeline.
+            Possible errors are caught and handled by tasks running specific parts of pipeline
         :return:
         """
         # TODO:
@@ -2828,11 +3253,62 @@ class RoboaoBrightStarPipeline(Pipeline):
 
         elif part == 'bright_star_pipeline:strehl':
             # compute strehl
-            pass
+            path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+            f_fits = '100p.fits'
+            path_out = os.path.join(path_obs, 'strehl')
+            _win = self.config['pipeline'][self.name]['strehl']['win']
+            _drizzled = True
+            _method = 'pipeline_settings.txt'
+            _plate_scale = self.config['telescope'][self.telescope]['scale_red']
+            _Strehl_factor = self.config['telescope'][self.telescope]['Strehl_factor'][self.db_entry['filter']]
+            _core_min = self.config['pipeline'][self.name]['strehl']['core_min']
+            _halo_max = self.config['pipeline'][self.name]['strehl']['halo_max']
 
-        elif part == 'bright_star_pipeline:strehl:preview':
-            # generate previews with strehl imprinted
-            pass
+            img, x, y = self.trim_frame(path_obs, _fits_name=f_fits,
+                                        _win=_win, _method=_method,
+                                        _drizzled=_drizzled)
+            core, halo = self.bad_obs_check(img, ps=_plate_scale)
+
+            boxsize = int(round(3. / _plate_scale))
+            SR, FWHM, box = self.Strehl_calculator(img, _Strehl_factor[0], _plate_scale, boxsize)
+
+            if core >= _core_min and halo <= _halo_max:
+                flag = 'OK'
+            else:
+                flag = 'BAD?'
+
+            # print(core, halo, SR*100, FWHM)
+
+            # dump results to disk
+            if not (os.path.exists(path_out)):
+                os.makedirs(path_out)
+
+            # save box around selected object:
+            hdu = fits.PrimaryHDU(box)
+            hdu.writeto(os.path.join(path_out, '{:s}_box.fits'.format(self.db_entry['_id'])), overwrite=True)
+
+            # save the Strehl data to txt-file:
+            with open(os.path.join(path_out, '{:s}_strehl.txt'.format(self.db_entry['_id'])), 'w') as _f:
+                _f.write('# lock_x[px] lock_y[px] core["] halo["] SR[%] FWHM["] flag\n')
+                output_entry = '{:d} {:d} {:.5f} {:.5f} {:.5f} {:.5f} {:s}\n'. \
+                    format(x, y, core, halo, SR * 100, FWHM, flag)
+                _f.write(output_entry)
+
+            # # reduction successful? prepare db entry for update
+            # f100p = os.path.join(out_dir, '100p.fits')
+            # if os.path.exists(f100p):
+            #     self.db_entry['pipelined'][self.name]['status']['done'] = True
+            #     # save fits header
+            #     self.db_entry['pipelined'][self.name]['fits_header'] = get_fits_header(f100p)
+            # else:
+            #     self.db_entry['pipelined'][self.name]['status']['done'] = False
+            # self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
+            # self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
+            # self.db_entry['pipelined'][self.name]['status']['retries'] += 1
+            #
+            # # set last_modified as 100p.fits modified date:
+            # time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir, '100p.fits')).st_mtime)
+            # self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
         elif part == 'bright_star_pipeline:pca':
             # run high-contrast pipeline
@@ -2892,7 +3368,7 @@ def job_bright_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _ta
         pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
         pip.run(part='bright_star_pipeline:preview')
 
-        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
+        return {'_id': _id, 'job': 'bright_star_pipeline:preview', 'hash': _task_hash,
                 'status': 'ok', 'message': str(datetime.datetime.now()),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
@@ -2913,8 +3389,124 @@ def job_bright_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _ta
         _status['preview']['retries'] += 1
         _status['preview']['done'] = False
         _status['preview']['force_redo'] = False
-        _status['last_modified'] = utc_now()
-        return {'_id': _id, 'job': 'bright_star_pipeline', 'hash': _task_hash,
+        _status['preview']['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'bright_star_pipeline:preview', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': _status
+                                     }}
+                                     )
+                }
+
+
+def job_bright_star_pipeline_strehl(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
+        pip.run(part='bright_star_pipeline:strehl')
+
+        return {'_id': _id, 'job': 'bright_star_pipeline:strehl', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['bright_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoBrightStarPipeline.init_status()
+        # retries++
+        _status['strehl']['status']['retries'] += 1
+        _status['strehl']['status']['done'] = False
+        _status['strehl']['status']['enqueued'] = False
+        _status['strehl']['status']['force_redo'] = False
+        _status['strehl']['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'bright_star_pipeline:strehl', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': _status
+                                     }}
+                                     )
+                }
+
+
+def job_bright_star_pipeline_pca(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
+        pip.run(part='bright_star_pipeline:pca')
+
+        return {'_id': _id, 'job': 'bright_star_pipeline:pca', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['bright_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoBrightStarPipeline.init_status()
+        # retries++
+        _status['pca']['status']['retries'] += 1
+        _status['pca']['status']['done'] = False
+        _status['pca']['status']['enqueued'] = False
+        _status['pca']['status']['force_redo'] = False
+        _status['pca']['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'bright_star_pipeline:pca', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': _status
+                                     }}
+                                     )
+                }
+
+
+def job_bright_star_pipeline_pca_preview(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoBrightStarPipeline(_config=_config, _db_entry=_db_entry)
+        pip.run(part='bright_star_pipeline:pca:preview')
+
+        return {'_id': _id, 'job': 'bright_star_pipeline:pca:preview', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.bright_star': pip.db_entry['pipelined']['bright_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['bright_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoBrightStarPipeline.init_status()
+        # retries++
+        _status['pca']['preview']['retries'] += 1
+        _status['pca']['preview']['done'] = False
+        _status['pca']['preview']['force_redo'] = False
+        _status['pca']['preview']['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'bright_star_pipeline:pca', 'hash': _task_hash,
                 'status': 'error', 'message': str(_e),
                 'db_record_update': ({'_id': _id},
                                      {'$set': {
