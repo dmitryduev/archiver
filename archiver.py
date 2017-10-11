@@ -935,7 +935,7 @@ class RoboaoArchiver(Archiver):
             Harvest processing results from dask.distributed results queue, update DB entries if necessary
         :return:
         """
-        # make sure the archiver is running. this is to protect from frozen thread on (user) exit
+        # make sure the archiver is running. this is to protect from frozen thread on (user) exit/crash
         while self.running:
             # get new results from queue one by one
             while not self.results.empty():
@@ -946,10 +946,10 @@ class RoboaoArchiver(Archiver):
                     self.logger.info('Task {:s} for {:s} finished with status {:s}'.format(result['job'],
                                                                                            result['_id'],
                                                                                            result['status']))
-                    # TODO: update DB entry
+                    # update DB entry
                     if 'db_record_update' in result:
                         self.update_db_entry(_collection='coll_obs', upd=result['db_record_update'])
-                    # TODO: remove from self.task_hashes
+                    # remove from self.task_hashes
                     if result['status'] == 'ok' and 'hash' in result:
                         self.task_hashes.remove(result['hash'])
                 except Exception as _e:
@@ -1000,7 +1000,12 @@ class RoboaoArchiver(Archiver):
                                                               _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
             elif argdict['task'] == 'faint_star_pipeline':
-                result = {'status': 'error', 'message': 'not implemented yet'}
+                result = job_faint_star_pipeline(_id=argdict['id'], _config=argdict['config'],
+                                                 _db_entry=argdict['db_entry'], _task_hash=_task_hash)
+
+            elif argdict['task'] == 'faint_star_pipeline:preview':
+                result = job_faint_star_pipeline_preview(_id=argdict['id'], _config=argdict['config'],
+                                                         _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
             elif argdict['task'] == 'faint_star_pipeline:strehl':
                 result = {'status': 'error', 'message': 'not implemented yet'}
@@ -1244,7 +1249,7 @@ class RoboaoArchiver(Archiver):
         """
             Update DB entry
             Note: it's mainly used by archiver's harvester, which is run in separate thread,
-                  therefore signals don't work :(
+                  therefore signals don't work, so can't use @timeout :(
         :return:
         """
         assert _collection is not None, 'Must specify collection'
@@ -1525,23 +1530,25 @@ class RoboaoArchiver(Archiver):
                                     continue
 
                                 try:
-                                    # check distribution status
-                                    s = roboao_obs.check_distributed()
-                                    if s['status'] == 'ok' and s['message'] is not None:
-                                        self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
-                                        self.logger.info('updated distribution status for {:s}'.format(obs))
-                                        self.logger.debug(dumps(s['db_record_update']))
-                                    # something failed?
-                                    elif s['status'] == 'error':
-                                        self.logger.error('{:s}, checking distribution status failed: {:s}'.format(obs,
-                                                                                                         s['message']))
-                                        # proceed to next obs:
-                                        continue
+                                    # nothing to do about obs?
+                                    if pipe_task is None:
+                                        # check distribution status
+                                        s = roboao_obs.check_distributed()
+                                        if s['status'] == 'ok' and s['message'] is not None:
+                                            self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                            self.logger.info('updated distribution status for {:s}'.format(obs))
+                                            self.logger.debug(dumps(s['db_record_update']))
+                                        # something failed?
+                                        elif s['status'] == 'error':
+                                            self.logger.error('{:s}, checking distribution status failed: {:s}'.
+                                                              format(obs, s['message']))
+                                            # proceed to next obs:
+                                            continue
                                 except Exception as _e:
                                     print(_e)
                                     traceback.print_exc()
                                     self.logger.error(_e)
-                                    self.logger.error('Raw files check failed for {:s}.'.format(obs))
+                                    self.logger.error('Distribution status check failed for {:s}.'.format(obs))
                                     continue
 
                 # unfinished tasks live here:
@@ -1572,9 +1579,9 @@ class RoboaoArchiver(Archiver):
             # any other error not captured otherwise
             print(e)
             traceback.print_exc()
+            self.running = False
             self.logger.error(e)
             self.logger.error('Unknown error, exiting. Please check the logs.')
-            self.running = False
             try:
                 self.logger.info('Shutting down.')
                 self.logger.debug('Cleaning tmp directory.')
@@ -2066,7 +2073,79 @@ class RoboaoObservation(Observation):
                 _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
                 return _task
 
-        # TODO: FSP?
+        # FSP?
+        ''' Bright star pipeline '''
+        pipe = RoboaoFaintStarPipeline(_config=self.config, _db_entry=self.db_entry)
+        # check conditions necessary to run (defined in config.json):
+        go = pipe.check_necessary_conditions()
+        # print('{:s} FSP go: '.format(self.id), go)
+
+        # good to go?
+        if go:
+            # should and can run FSP pipeline itself?
+            _part = 'faint_star_pipeline'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                # mark enqueued
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['status']['enqueued'] = True
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
+                return _task
+
+            # should and can run Strehl calculation?
+            _part = 'faint_star_pipeline:strehl'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                # mark enqueued
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['strehl']['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
+                return _task
+
+            # should and can run preview generation for FSP pipeline itself?
+            _part = 'faint_star_pipeline:preview'
+            go = pipe.check_conditions(part=_part)
+            # print(self.id, _part, go)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+                return _task
+
+            # should and can run PCA pipeline?
+            _part = 'faint_star_pipeline:pca'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                # mark enqueued
+                pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['status']['enqueued'] = True
+                # pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['pca']['last_modified'] = utc_now()
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry,
+                         'db_record_update': ({'_id': self.id},
+                                              {'$set': {
+                                                  'pipelined.{:s}'.format(pipe.name):
+                                                      pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]
+                                              }}
+                                              )
+                         }
+                return _task
+
+            # should and can run preview generation for PCA results?
+            _part = 'faint_star_pipeline:pca:preview'
+            go = pipe.check_conditions(part=_part)
+            if go:
+                _task = {'task': _part, 'id': self.id, 'config': self.config, 'db_entry': pipe.db_entry}
+                return _task
 
         # TODO: EOP?
 
@@ -3862,6 +3941,393 @@ def job_bright_star_pipeline_pca_preview(_id=None, _config=None, _db_entry=None,
                                      }}
                                      )
                 }
+
+
+class RoboaoFaintStarPipeline(RoboaoPipeline):
+    """
+        Robo-AO's Bright Star Pipeline
+    """
+    def __init__(self, _config, _db_entry):
+        """
+            Init Robo-AO's Bright Star Pipeline
+            :param _config: dict with configuration
+            :param _db_entry: observation DB entry
+        """
+        ''' initialize super class '''
+        super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
+
+        # pipeline name. This goes to 'pipelined' field of obs DB entry
+        self.name = 'faint_star'
+
+        # initialize status
+        if self.name not in self.db_entry['pipelined']:
+            self.db_entry['pipelined'][self.name] = self.init_status()
+
+    def check_necessary_conditions(self):
+        """
+            Check if should be run on an obs (if necessary conditions are met)
+            :param _db_entry: observation DB entry
+        :return:
+        """
+        go = True
+
+        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
+            if field_name != 'help':
+                # build proper dict reference expression
+                keys = field_name.split('.')
+                expr = 'self.db_entry'
+                for key in keys:
+                    expr += "['{:s}']".format(key)
+                # get condition
+                condition = eval(expr + ' ' + field_condition)
+                # eval condition
+                go = go and condition
+
+        return go
+
+    def check_conditions(self, part=None):
+        """
+            Perform condition checks for running specific parts of pipeline
+            :param part: which part of pipeline to run
+        :return:
+        """
+        assert part is not None, 'must specify what to check'
+
+        # check the FSP itself?
+        if part == 'faint_star_pipeline':
+
+            # BSP checks are done to avoid uncompressing bzipped files multiple times
+            # BSP no go?
+            _bsp_no_go = 'bright_star' not in self.db_entry['pipelined']
+            # BSP go and done?
+            _bsp_go_and_done = ('bright_star' in self.db_entry['pipelined']) and \
+               self.db_entry['pipelined']['bright_star']['status']['done']
+
+            # force redo requested?
+            _force_redo = self.db_entry['pipelined'][self.name]['status']['force_redo']
+            # pipeline done?
+            _done = self.db_entry['pipelined'][self.name]['status']['done']
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['status']['retries']
+
+            go = (_bsp_no_go or _bsp_go_and_done) and \
+                 (_force_redo or ((not _done) and (_num_tries <= self.config['misc']['max_retries'])))
+
+            return go
+
+        # Preview generation for the results of BSP processing?
+        elif part == 'faint_star_pipeline:preview':
+
+            # pipeline done?
+            _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+
+            # preview generated?
+            _preview_done = self.db_entry['pipelined'][self.name]['preview']['done']
+
+            # last_modified == pipe_last_modified?
+            _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+
+            go = _pipe_done and ((not _preview_done) or _outdated)
+
+            return go
+
+        # Strehl calculation for the results of BSP processing?
+        elif part == 'faint_star_pipeline:strehl':
+
+            # # pipeline done?
+            # _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+            #
+            # # failed?
+            # _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+            #
+            # # Strehl calculated?
+            # _strehl_done = self.db_entry['pipelined'][self.name]['strehl']['status']['done']
+            #
+            # # last_modified == pipe_last_modified?
+            # _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
+            #                  self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            #
+            # # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            # go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated)
+            #
+            # return go
+            return False
+
+        # Run PCA high-contrast processing pipeline?
+        elif part == 'faint_star_pipeline:pca':
+
+            # # pipeline done?
+            # _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+            #
+            # # failed?
+            # _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+            #
+            # # pca done?
+            # _pca_done = self.db_entry['pipelined'][self.name]['pca']['status']['done']
+            #
+            # # last_modified == pipe_last_modified?
+            # _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['last_modified'] -
+            #                  self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            #
+            # # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            # go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated)
+            #
+            # return go
+            return False
+
+        elif part == 'faint_star_pipeline:pca:preview':
+
+            # # pipeline done?
+            # _pipe_done = self.db_entry['pipelined'][self.name]['status']['done']
+            #
+            # # failed?
+            # _pipe_failed = self.db_entry['pipelined'][self.name]['classified_as'] == 'failed'
+            #
+            # # pca done?
+            # _pca_done = self.db_entry['pipelined'][self.name]['pca']['status']['done']
+            #
+            # # pca preview done?
+            # _pca_preview_done = self.db_entry['pipelined'][self.name]['pca']['preview']['done']
+            #
+            # # last_modified == pipe_last_modified?
+            # _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] -
+            #                  self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            #
+            # go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated)
+            #
+            # return go
+            return False
+
+    @staticmethod
+    def init_status():
+        time_now_utc = utc_now()
+        return {
+            'status': {
+                'done': False,
+                'enqueued': False,
+                'force_redo': False,
+                'retries': 0,
+            },
+            'last_modified': time_now_utc,
+            'preview': {
+                'done': False,
+                'force_redo': False,
+                'retries': 0,
+                'last_modified': time_now_utc
+            },
+            'location': [],
+            'lock_position': None,
+            'shifts': None,
+
+            'strehl': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'lock_position': None,
+                'ratio_percent': None,
+                'core_arcsec': None,
+                'halo_arcsec': None,
+                'fwhm_arcsec': None,
+                'flag': None,
+                'last_modified': time_now_utc
+            },
+            'pca': {
+                'status': {
+                    'force_redo': False,
+                    'enqueued': False,
+                    'done': False,
+                    'retries': 0
+                },
+                'preview': {
+                    'force_redo': False,
+                    'done': False,
+                    'retries': 0,
+                    'last_modified': time_now_utc
+                },
+                'lock_position': None,
+                'contrast_curve': None,
+                'library_psf_id_corr': None,
+                'last_modified': time_now_utc
+            }
+        }
+
+    def generate_preview(self, f_fits, path_obs, path_out):
+        # TODO:
+        # load first image frame from the fits file
+        preview_img = np.nan_to_num(load_fits(f_fits))
+        # scale with local contrast optimization for preview:
+        preview_img = self.scale_image(preview_img, correction='local')
+        # cropped image [_win=None to try to detect]
+        preview_img_cropped, _x, _y = self.trim_frame(_path=path_obs,
+                                                      _fits_name=os.path.split(f_fits)[1],
+                                                      _win=None, _method='shifts.txt',
+                                                      _x=None, _y=None, _drizzled=True)
+
+        # Strehl ratio (if available, otherwise will be None)
+        SR = self.db_entry['pipelined'][self.name]['strehl']['ratio_percent']
+
+        # fits_header = get_fits_header(f_fits)
+        fits_header = self.db_entry['fits_header']
+        try:
+            # _pix_x = int(re.search(r'(:)(\d+)',
+            #                        _select['pipelined'][_pipe]['fits_header']['DETSIZE'][0]).group(2))
+            _pix_x = int(re.search(r'(:)(\d+)', fits_header['DETSIZE'][0]).group(2))
+        except KeyError:
+            # this should be there, even if it's sum.fits
+            _pix_x = int(fits_header['NAXIS1'][0])
+
+        self.preview(path_out, self.db_entry['_id'], preview_img, preview_img_cropped,
+                     SR, _fow_x=self.config['telescope'][self.telescope]['fov_x'],
+                     _pix_x=_pix_x, _drizzled=False,
+                     _x=_x, _y=_y)
+
+    def generate_pca_preview(self, _path_out, _preview_img, _cc, _fow_x=36, _pix_x=1024, _drizzled=False):
+        """
+            Generate preview images for the pca pipeline
+
+        :param _path_out:
+        :param _preview_img:
+        :param _cc: contrast curve
+        :param _fow_x: full FoW in arcseconds in the x direction
+        :param _pix_x: original (raw) full frame size in pixels
+        :param _drizzled: drizzle on or off?
+
+        :return:
+        """
+        import matplotlib.pyplot as plt
+        _obs = self.db_entry['_id']
+
+        ''' plot psf-subtracted image '''
+        plt.close('all')
+        fig = plt.figure(_obs)
+        fig.set_size_inches(3, 3, forward=False)
+        # ax = fig.add_subplot(111)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
+        ax.imshow(_preview_img, cmap=plt.cm.magma, origin='lower', interpolation='nearest')
+        # add scale bar:
+        # draw a horizontal bar with length of 0.1*x_size
+        # (ax.transData) with a label underneath.
+        bar_len = _preview_img.shape[0] * 0.1
+        # account for possible drizzling
+        mltplr = 2 if _drizzled else 1
+        bar_len_str = '{:.1f}'.format(bar_len * _fow_x / _pix_x / mltplr)
+        asb = AnchoredSizeBar(ax.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax.add_artist(asb)
+
+        # save figure
+        fig.savefig(os.path.join(_path_out, _obs + '_pca.png'), dpi=300)
+
+        ''' plot the contrast curve '''
+        # convert cc to numpy array if necessary:
+
+        if not isinstance(_cc, np.ndarray):
+            _cc = np.array(_cc)
+
+        plt.close('all')
+        fig = plt.figure('Contrast curve for {:s}'.format(_obs), figsize=(8, 3.5), dpi=200)
+        ax = fig.add_subplot(111)
+        ax.set_title(_obs)  # , fontsize=14)
+        # ax.plot(_cc[:, 0], -2.5 * np.log10(_cc[:, 1]), 'k-', linewidth=2.5)
+        # _cc[:, 1] is already in mag:
+        ax.plot(_cc[:, 0], _cc[:, 1], 'k-', linewidth=2.5)
+        ax.set_xlim([0.2, 1.45])
+        ax.set_xlabel('Separation [arcseconds]')  # , fontsize=18)
+        ax.set_ylabel('Contrast [$\Delta$mag]')  # , fontsize=18)
+        ax.set_ylim([0, 8])
+        ax.set_ylim(ax.get_ylim()[::-1])
+        ax.grid(linewidth=0.5)
+        plt.tight_layout()
+        fig.savefig(os.path.join(_path_out, _obs + '_contrast_curve.png'), dpi=200)
+
+    def run(self, part=None):
+        """
+            Execute specific part of pipeline.
+            Possible errors are caught and handled by tasks running specific parts of pipeline
+        :return:
+        """
+        # TODO:
+        assert part is not None, 'must specify part to execute'
+
+        # UTC date of obs:
+        _date = self.db_entry['date_utc'].strftime('%Y%m%d')
+
+        # path to store unzipped raw files
+        _path_tmp = self.config['path']['path_tmp']
+        # path to raw files:
+        _path_raw = os.path.join(self.db_entry['raw_data']['location'][1], _date)
+        # path to archive:
+        _path_archive = os.path.join(self.config['path']['path_archive'], _date)
+        # path to calibration data produced by lucky pipeline:
+        _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
+
+        if part == 'faint_star_pipeline':
+            # steps from reduce_data_multithread.py + image_reconstruction.cpp
+
+            # raw files:
+            _raws_zipped = sorted(self.db_entry['raw_data']['data'])
+
+            # unbzip raw source file(s):
+            lbunzip2(_path_in=_path_raw, _files=_raws_zipped, _path_out=_path_tmp, _keep=True)
+
+            # unzipped file names:
+            raws = [os.path.join(_path_tmp, os.path.splitext(_f)[0]) for _f in _raws_zipped]
+
+            ''' go off with processing '''
+            # TODO:
+            raise NotImplementedError
+
+            # reduction successful? prepare db entry for update
+            self.db_entry['pipelined'][self.name]['status']['done'] = True
+            self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
+            self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['status']['retries'] += 1
+
+            # set last_modified as 100p.fits modified date:
+            time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir,
+                               '{:s}_summed.fits'.format(self.db_entry['_id']))).st_mtime)
+            self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
+
+            for _file in raws:
+                print('removing', _file)
+                os.remove(os.path.join(_file))
+
+        elif part == 'bright_star_pipeline:preview':
+            # generate previews
+            path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+            f_fits = os.path.join(path_obs, '{:s}_summed.fits'.format(self.db_entry['_id']))
+            path_out = os.path.join(path_obs, 'preview')
+            self.generate_preview(f_fits=f_fits, path_obs=path_obs, path_out=path_out)
+
+            # prepare to update db entry:
+            self.db_entry['pipelined'][self.name]['preview']['done'] = True
+            self.db_entry['pipelined'][self.name]['preview']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['preview']['retries'] += 1
+            self.db_entry['pipelined'][self.name]['preview']['last_modified'] = \
+                self.db_entry['pipelined'][self.name]['last_modified']
+
+        elif part == 'bright_star_pipeline:strehl':
+            # compute strehl
+            raise NotImplementedError
+
+        elif part == 'bright_star_pipeline:pca':
+            # run high-contrast pipeline
+            raise NotImplementedError
+
+        elif part == 'bright_star_pipeline:pca:preview':
+            # generate previews for high-contrast pipeline
+            raise NotImplementedError
+
+        else:
+            raise RuntimeError('unknown pipeline part')
 
 
 if __name__ == '__main__':
