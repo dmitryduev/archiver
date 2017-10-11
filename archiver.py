@@ -15,6 +15,10 @@ import numpy as np
 from scipy.optimize import fmin
 from astropy.modeling import models, fitting
 import scipy.ndimage as ndimage
+import vip
+import photutils
+from scipy import stats
+import operator
 import glob
 import traceback
 import sys
@@ -2406,6 +2410,13 @@ class RoboaoPipeline(Pipeline):
         """
         raise NotImplementedError
 
+    def generate_pca_preview(self, **kwargs):
+        """
+            Generate preview images
+        :return:
+        """
+        raise NotImplementedError
+
     @staticmethod
     def scale_image(image, correction='local'):
         """
@@ -3037,9 +3048,9 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     'retries': 0,
                     'last_modified': time_now_utc
                 },
-                'location': [],
                 'lock_position': None,
                 'contrast_curve': None,
+                'library_psf_id_corr': None,
                 'last_modified': time_now_utc
             }
         }
@@ -3121,6 +3132,69 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                      SR, _fow_x=self.config['telescope'][self.telescope]['fov_x'],
                      _pix_x=_pix_x, _drizzled=True,
                      _x=_x, _y=_y)
+
+    def generate_pca_preview(self, _path_out, _preview_img, _cc, _fow_x=36, _pix_x=1024, _drizzled=True):
+        """
+            Generate preview images for the pca pipeline
+
+        :param _path_out:
+        :param _preview_img:
+        :param _cc: contrast curve
+        :param _fow_x: full FoW in arcseconds in the x direction
+        :param _pix_x: original (raw) full frame size in pixels
+        :param _drizzled: drizzle on or off?
+
+        :return:
+        """
+        import matplotlib.pyplot as plt
+        _obs = self.db_entry['_id']
+
+        ''' plot psf-subtracted image '''
+        plt.close('all')
+        fig = plt.figure(_obs)
+        fig.set_size_inches(3, 3, forward=False)
+        # ax = fig.add_subplot(111)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
+        ax.imshow(_preview_img, cmap=plt.cm.magma, origin='lower', interpolation='nearest')
+        # add scale bar:
+        # draw a horizontal bar with length of 0.1*x_size
+        # (ax.transData) with a label underneath.
+        bar_len = _preview_img.shape[0] * 0.1
+        # account for possible drizzling
+        mltplr = 2 if _drizzled else 1
+        bar_len_str = '{:.1f}'.format(bar_len * _fow_x / _pix_x / mltplr)
+        asb = AnchoredSizeBar(ax.transData,
+                              bar_len,
+                              bar_len_str[0] + r"$^{\prime\prime}\!\!\!.$" + bar_len_str[-1],
+                              loc=4, pad=0.3, borderpad=0.5, sep=10, frameon=False)
+        ax.add_artist(asb)
+
+        # save figure
+        fig.savefig(os.path.join(_path_out, _obs + '_pca.png'), dpi=300)
+
+        ''' plot the contrast curve '''
+        # convert cc to numpy array if necessary:
+
+        if not isinstance(_cc, np.ndarray):
+            _cc = np.array(_cc)
+
+        plt.close('all')
+        fig = plt.figure('Contrast curve for {:s}'.format(_obs), figsize=(8, 3.5), dpi=200)
+        ax = fig.add_subplot(111)
+        ax.set_title(_obs)  # , fontsize=14)
+        # ax.plot(_cc[:, 0], -2.5 * np.log10(_cc[:, 1]), 'k-', linewidth=2.5)
+        # _cc[:, 1] is already in mag:
+        ax.plot(_cc[:, 0], _cc[:, 1], 'k-', linewidth=2.5)
+        ax.set_xlim([0.2, 1.45])
+        ax.set_xlabel('Separation [arcseconds]')  # , fontsize=18)
+        ax.set_ylabel('Contrast [$\Delta$mag]')  # , fontsize=18)
+        ax.set_ylim([0, 8])
+        ax.set_ylim(ax.get_ylim()[::-1])
+        ax.grid(linewidth=0.5)
+        plt.tight_layout()
+        fig.savefig(os.path.join(_path_out, _obs + '_contrast_curve.png'), dpi=200)
 
     def run(self, part=None):
         """
@@ -3349,7 +3423,11 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             f_fits = os.path.join(path_obs, '100p.fits')
             path_out = os.path.join(path_obs, 'preview')
             self.generate_preview(f_fits=f_fits, path_obs=path_obs, path_out=path_out)
+
+            # prepare to update db entry:
             self.db_entry['pipelined'][self.name]['preview']['done'] = True
+            self.db_entry['pipelined'][self.name]['preview']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['preview']['retries'] += 1
             self.db_entry['pipelined'][self.name]['preview']['last_modified'] = \
                 self.db_entry['pipelined'][self.name]['last_modified']
 
@@ -3398,6 +3476,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
 
             # reduction successful? prepare db entry for update
             self.db_entry['pipelined'][self.name]['strehl']['status']['done'] = True
+            # make sure to (re)make preview with imprinted Strehl:
+            self.db_entry['pipelined'][self.name]['preview']['done'] = False
             self.db_entry['pipelined'][self.name]['strehl']['status']['enqueued'] = False
             self.db_entry['pipelined'][self.name]['strehl']['status']['force_redo'] = False
             self.db_entry['pipelined'][self.name]['strehl']['status']['retries'] += 1
@@ -3414,11 +3494,176 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
 
         elif part == 'bright_star_pipeline:pca':
             # run high-contrast pipeline
-            raise NotImplementedError
+            print('running PCA pipeline for {:s}'.format(self.db_entry['_id']))
+            with fits.open(self.config['pipeline'][self.name]['high_contrast']['path_psf_reference_library']) as _lib:
+                _library = _lib[0].data
+                _library_names_short = _lib[-1].data['obj_names']
+                _library_ids = _lib[-1].data['obs_names']
+
+            _win = self.config['pipeline'][self.name]['high_contrast']['win']
+            _sigma = self.config['pipeline'][self.name]['high_contrast']['sigma']
+            _nrefs = self.config['pipeline'][self.name]['high_contrast']['nrefs']
+            _klip = self.config['pipeline'][self.name]['high_contrast']['klip']
+
+            _plate_scale = self.config['telescope'][self.telescope]['scale_red']
+
+            path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+            f_fits = '100p.fits'
+            path_out = os.path.join(path_obs, 'pca')
+            _method = 'pipeline_settings.txt'
+            _drizzled = True
+
+            _trimmed_frame, x_lock, y_lock = self.trim_frame(path_obs, _fits_name=f_fits,
+                                                             _win=_win, _method=_method,
+                                                             _x=None, _y=None, _drizzled=_drizzled)
+            print(x_lock, y_lock)
+
+            # Filter the trimmed frame with IUWT filter, 2 coeffs
+            filtered_frame = (vip.var.cube_filter_iuwt(
+                np.reshape(_trimmed_frame, (1, np.shape(_trimmed_frame)[0], np.shape(_trimmed_frame)[1])),
+                coeff=5, rel_coeff=2))
+            print(filtered_frame.shape)
+
+            _fit = vip.var.fit_2dgaussian(filtered_frame[0], crop=True, cropsize=50,
+                                          debug=False, full_output=True)
+
+            # mean_y = float(_fit['centroid_y'])
+            # mean_x = float(_fit['centroid_x'])
+            fwhm_y = float(_fit['fwhm_y'])
+            fwhm_x = float(_fit['fwhm_x'])
+            # amplitude = float(_fit['amplitude'])
+            # theta = float(_fit['theta'])
+
+            _fwhm = np.mean([fwhm_y, fwhm_x])
+
+            # Print the resolution element size
+            # print('Using resolution element size = ', _fwhm)
+            if _fwhm < 2:
+                _fwhm = 2.0
+                # print('Too small, changing to ', _fwhm)
+            _fwhm = int(_fwhm)
+
+            # Center the filtered frame
+            centered_cube, shy, shx = \
+                (vip.preproc.cube_recenter_gauss2d_fit(array=filtered_frame, xy=(_win, _win), fwhm=_fwhm,
+                                                       subi_size=6, nproc=1, full_output=True))
+
+            centered_frame = centered_cube[0]
+
+            if shy > 5 or shx > 5:
+                raise TypeError('Centering failed: pixel shifts too big')
+
+            # Do aperture photometry on the central star
+            center_aperture = photutils.CircularAperture(
+                (int(len(centered_frame) / 2), int(len(centered_frame) / 2)), _fwhm / 2.0)
+            center_flux = photutils.aperture_photometry(centered_frame, center_aperture)['aperture_sum'][0]
+
+            # Make PSF template for calculating PCA throughput
+            psf_template = (
+                centered_frame[len(centered_frame) // 2 - 3 * _fwhm:len(centered_frame) // 2 + 3 * _fwhm,
+                len(centered_frame) // 2 - 3 * _fwhm:len(centered_frame) // 2 + 3 * _fwhm])
+
+            # Choose reference frames via cross correlation
+            # source short name:
+            _sou_name = self.db_entry['name']
+            # make sure not to use any observations of the source:
+            library_notmystar = _library[~np.in1d(_library_names_short, _sou_name)]
+            library_ids_notmystar = _library_ids[~np.in1d(_library_names_short, _sou_name)]
+            cross_corr = np.zeros(len(library_notmystar))
+            flattened_frame = np.ndarray.flatten(centered_frame)
+
+            for c in range(len(library_notmystar)):
+                cross_corr[c] = stats.pearsonr(flattened_frame,
+                                               np.ndarray.flatten(library_notmystar[c, :, :]))[0]
+
+            index_sorted = np.argsort(cross_corr)[::-1]
+            cross_corr_sorted = sorted(cross_corr)[::-1]
+            library = library_notmystar[index_sorted[0:int(_nrefs)], :, :]
+            library_ids = library_ids_notmystar[index_sorted[0:int(_nrefs)]]
+            library_psf_id_corr = {_nn: _cc for _nn, _cc in zip(library_ids, cross_corr_sorted[0:int(_nrefs)])}
+            print('Library correlations:\n', library_psf_id_corr)
+
+            # Do PCA
+            reshaped_frame = np.reshape(centered_frame, (1, centered_frame.shape[0], centered_frame.shape[1]))
+            pca_frame = vip.pca.pca(cube=reshaped_frame, angle_list=np.zeros(1),
+                                    cube_ref=library, ncomp=_klip, verbose=True)
+
+            pca_file_name = os.path.join(path_out, self.db_entry['_id'] + '_pca.fits')
+            print(pca_file_name)
+
+            # dump results to disk
+            if not (os.path.exists(path_out)):
+                os.makedirs(path_out)
+
+            # save fits after PCA
+            hdu = fits.PrimaryHDU(pca_frame)
+            hdulist = fits.HDUList([hdu])
+            hdulist.writeto(pca_file_name, clobber=True)
+
+            # Make contrast curve
+            datafr = (vip.phot.contrcurve.contrast_curve(cube=reshaped_frame, angle_list=np.zeros(1),
+                                                         psf_template=psf_template,
+                                                         cube_ref=library, fwhm=_fwhm,
+                                                         pxscale=_plate_scale,
+                                                         starphot=center_flux, sigma=_sigma,
+                                                         ncomp=_klip, algo=vip.pca.pca,
+                                                         debug=False, plot=False, nbranch=3, scaling=None,
+                                                         mask_center_px=_fwhm, fc_rad_sep=6,
+                                                         imlib='ndimage-fourier'))
+            # con = datafr['sensitivity (Gauss)']
+            cont = datafr['sensitivity (Student)']
+            sep = datafr['distance']
+
+            # save txt for nightly median calc/plot
+            with open(os.path.join(path_out, self.db_entry['_id'] + '_contrast_curve.txt'), 'w') as f:
+                f.write('# lock position: {:d} {:d}\n'.format(x_lock, y_lock))
+                for _s, dm in zip(sep * _plate_scale, -2.5 * np.log10(cont)):
+                    f.write('{:.3f} {:.3f}\n'.format(_s, dm))
+
+            # reduction successful? prepare db entry for update
+            self.db_entry['pipelined'][self.name]['pca']['status']['done'] = True
+            self.db_entry['pipelined'][self.name]['pca']['status']['enqueued'] = False
+            self.db_entry['pipelined'][self.name]['pca']['status']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['pca']['status']['retries'] += 1
+            # set last_modified as for the pipe itself:
+            self.db_entry['pipelined'][self.name]['pca']['last_modified'] = \
+                self.db_entry['pipelined'][self.name]['last_modified']
+
+            self.db_entry['pipelined'][self.name]['pca']['lock_position'] = [x_lock, y_lock]
+            self.db_entry['pipelined'][self.name]['pca']['contrast_curve'] = list(zip(sep * _plate_scale,
+                                                                                      -2.5 * np.log10(cont)))
+            self.db_entry['pipelined'][self.name]['pca']['library_psf_id_corr'] = library_psf_id_corr
 
         elif part == 'bright_star_pipeline:pca:preview':
             # generate previews for high-contrast pipeline
-            raise NotImplementedError
+            path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
+            path_out = os.path.join(path_obs, 'pca')
+            _drizzled = True
+
+            # what's in a fits name?
+            f_fits = os.path.join(path_out, '{:s}_pca.fits'.format(self.db_entry['_id']))
+
+            # load first image frame from the fits file
+            _preview_img = load_fits(f_fits)
+            # scale with local contrast optimization for preview:
+            _preview_img = self.scale_image(_preview_img, correction='local')
+
+            # contrast_curve:
+            _cc = self.db_entry['pipelined'][self.name]['pca']['contrast_curve']
+
+            # number of pixels in X on the detector
+            _pix_x = int(re.search(r'(:)(\d+)', self.db_entry['fits_header']['DETSIZE'][0]).group(2))
+
+            self.generate_pca_preview(path_out, _preview_img=_preview_img, _cc=_cc,
+                                      _fow_x=self.config['telescope'][self.telescope]['fov_x'], _pix_x=_pix_x,
+                                      _drizzled=_drizzled)
+
+            # success? prepare to update db entry:
+            self.db_entry['pipelined'][self.name]['pca']['preview']['done'] = True
+            self.db_entry['pipelined'][self.name]['pca']['preview']['force_redo'] = False
+            self.db_entry['pipelined'][self.name]['pca']['preview']['retries'] += 1
+            self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] = \
+                self.db_entry['pipelined'][self.name]['last_modified']
 
         else:
             raise RuntimeError('unknown pipeline part')
