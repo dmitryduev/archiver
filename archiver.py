@@ -280,6 +280,12 @@ def export_fits(path, _data, _header=None):
     :return:
     """
     if _header is not None:
+        # _header is a dict? convert to astropy.io.fits.Header first:
+        if isinstance(_header, dict):
+            new_header = fits.Header()
+            for _k in _header:
+                new_header[_k] = tuple(_header[_k])
+            _header = new_header
         hdu = fits.PrimaryHDU(_data, header=_header)
     else:
         hdu = fits.PrimaryHDU(_data)
@@ -1488,7 +1494,9 @@ class RoboaoArchiver(Archiver):
                                     # something failed?
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking DB entry failed: {:s}'.format(obs,
-                                                                                                         s['message']))
+                                                                                                        s['message']))
+                                        self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('Corrected DB entry for {:s}'.format(obs))
                                         # proceed to next obs:
                                         continue
                                 except Exception as _e:
@@ -1949,13 +1957,13 @@ class RoboaoObservation(Observation):
             Might add more checks in the future. Currently only checks pipelining status
         :return:
         """
-        try:
-            _date = self.db_entry['date_utc'].strftime('%Y%m%d')
+        _date = self.db_entry['date_utc'].strftime('%Y%m%d')
 
-            _pipe_names = ['bright_star', 'faint_star']
+        _pipe_names = ['bright_star', 'faint_star']
 
-            for _pipe_name in _pipe_names:
+        for _pipe_name in _pipe_names:
 
+            try:
                 # pipe self
                 _path_pipe = os.path.join(self.config['path']['path_archive'], _date, self.id, _pipe_name)
 
@@ -1964,13 +1972,16 @@ class RoboaoObservation(Observation):
                     # do not check enqueued stuff here:
                     if (_pipe_name in self.db_entry['pipelined']) and \
                             (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']):
-                        # check folder modified date:
-                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_pipe,
-                                                                                           '100p.fits')).st_mtime)
+                        # check modified date:
+                        _fits = '100p.fits' if _pipe_name == 'bright_star' \
+                            else '{:s}_summed.fits'.format(self.db_entry['_id'])
+                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_pipe, _fits)).st_mtime)
                         # time_tag = mdate_walk(_path_pipe)
                         # bad time tag? force redo!
-                        if abs((time_tag - self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
-                            return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
+                        if abs((time_tag -
+                                self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
+                            return {'status': 'ok',
+                                    'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
                                     'db_record_update': ({'_id': self.id},
                                                          {'$unset': {
                                                              'pipelined.{:s}'.format(_pipe_name): 1
@@ -1988,11 +1999,17 @@ class RoboaoObservation(Observation):
                                                  )
                             }
 
-            return {'status': 'ok', 'message': None}
+            except Exception as _e:
+                traceback.print_exc()
+                return {'status': 'error', 'message': str(_e),
+                        'db_record_update': ({'_id': self.id},
+                                             {'$unset': {
+                                                 'pipelined.{:s}'.format(_pipe_name): 1
+                                             }}
+                                             )
+                        }
 
-        except Exception as _e:
-            traceback.print_exc()
-            return {'status': 'error', 'message': str(_e)}
+        return {'status': 'ok', 'message': None}
 
     def get_task(self):
         """
@@ -2169,23 +2186,28 @@ class RoboaoObservation(Observation):
         try:
             # raw file names
             _raws = [_s for _s in _date_raw_data if re.match(re.escape(self.id), _s) is not None]
-            # deleted?!
+            # deleted?! unset pipelined as well
             if len(_raws) == 0:
                 self.db_entry['raw_data']['location'] = []
                 self.db_entry['raw_data']['data'] = []
                 self.db_entry['raw_data']['last_modified'] = utc_now()
                 return {'status': 'error', 'message': 'raw files for {:s} not available any more'.format(self.id),
                         'db_record_update': ({'_id': self.id},
-                                             {'$set': {
-                                                 # 'exposure': None,
-                                                 # 'magnitude': None,
-                                                 # 'fits_header': {},
-                                                 # 'coordinates': {},
-                                                 'raw_data.location': [],
-                                                 'raw_data.data': [],
-                                                 'raw_data.last_modified': self.db_entry['raw_data']['last_modified']
-                                             }}
-                                             )
+                                             {
+                                                 '$set': {
+                                                     # 'exposure': None,
+                                                     # 'magnitude': None,
+                                                     # 'fits_header': {},
+                                                     # 'coordinates': {},
+                                                     'raw_data.location': [],
+                                                     'raw_data.data': [],
+                                                     'raw_data.last_modified':
+                                                         self.db_entry['raw_data']['last_modified']
+                                                 },
+                                                 '$unset': {
+                                                     'pipelined': 1
+                                                 }
+                                             })
                         }
             # time tags. use the 'freshest' time tag for 'last_modified'
             time_tags = [datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_location, _date, _s)).st_mtime)
@@ -2275,7 +2297,8 @@ class RoboaoObservation(Observation):
                 # we'll provide it with proper query to feed into pymongo's update_one()
                 return {'status': 'ok', 'message': 'raw files changed',
                         'db_record_update': ({'_id': self.id},
-                                             {'$set': {
+                                             {
+                                                 '$set': {
                                                     'exposure': self.db_entry['exposure'],
                                                     'magnitude': self.db_entry['magnitude'],
                                                     'fits_header': self.db_entry['fits_header'],
@@ -2283,7 +2306,11 @@ class RoboaoObservation(Observation):
                                                     'raw_data.location': self.db_entry['raw_data']['location'],
                                                     'raw_data.data': self.db_entry['raw_data']['data'],
                                                     'raw_data.last_modified': time_tag
-                                             }}
+                                                 },
+                                                 '$unset': {
+                                                     'pipelined.*': 1
+                                                 }
+                                             }
                                              )
                         }
             else:
@@ -2543,14 +2570,15 @@ class RoboaoPipeline(Pipeline):
 
         # extract sources
         sew = sewpy.SEW(params=["X_IMAGE", "Y_IMAGE", "XPEAK_IMAGE", "YPEAK_IMAGE",
-                                "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS"],
-                        config={"DETECT_MINAREA": 10, "PHOT_APERTURES": "10", 'DETECT_THRESH': '5.0'},
+                                "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS", "FLAGS_WEIGHT",
+                                "FLUX_AUTO", "FLUXERR_AUTO", "FLUX_RADIUS"],
+                        config={"DETECT_MINAREA": 5, "PHOT_APERTURES": "10", 'DETECT_THRESH': '5.0'},
                         sexpath="sex")
 
         out = sew(os.path.join(_path, _fits_name))
         # sort by FWHM
-        out['table'].sort('FWHM_IMAGE')
-        # descending order
+        out['table'].sort('FLUX_AUTO')
+        # descending order: first is brightest
         out['table'].reverse()
 
         # print(out['table'])  # This is an astropy table.
@@ -2615,7 +2643,7 @@ class RoboaoPipeline(Pipeline):
         flat_image = os.path.join(_path_calib, 'flat_{:s}.fits'.format(_filt))
 
         if not os.path.exists(dark_image) or not os.path.exists(flat_image):
-            raise Exception('Could not find calibration (some) data for {:s}'.format(_date))
+            raise Exception('Could not find calibration (some) data in {:s}'.format(_path_calib))
         else:
             with fits.open(dark_image) as dark, fits.open(flat_image) as flat:
                 # replace NaNs if necessary
@@ -2746,14 +2774,15 @@ class RoboaoPipeline(Pipeline):
         if _method == 'sextractor':
             # extract sources
             sew = sewpy.SEW(params=["X_IMAGE", "Y_IMAGE", "XPEAK_IMAGE", "YPEAK_IMAGE",
-                                    "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS"],
+                                    "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS", "FLAGS_WEIGHT",
+                                    "FLUX_AUTO", "FLUXERR_AUTO", "FLUX_RADIUS"],
                             config={"DETECT_MINAREA": 8, "PHOT_APERTURES": "10", 'DETECT_THRESH': '5.0'},
                             sexpath="sex")
 
             out = sew(os.path.join(_path, _fits_name))
             # sort by FWHM
-            out['table'].sort('FWHM_IMAGE')
-            # descending order
+            out['table'].sort('FLUX_AUTO')
+            # descending order: brightest first
             out['table'].reverse()
 
             # print(out['table'])  # This is an astropy table.
@@ -3437,6 +3466,9 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
         # TODO:
         assert part is not None, 'must specify part to execute'
 
+        # verbose?
+        _v = self.config['pipeline'][self.name]['verbose']
+
         # UTC date of obs:
         _date = self.db_entry['date_utc'].strftime('%Y%m%d')
 
@@ -3487,7 +3519,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             for fn, orig_fn in sorted(files_to_analyse):
                 # print('_____________________')
                 # print(files_to_analyse)
-                print("Analysing", orig_fn)
+                if _v:
+                    print("Analysing", orig_fn)
                 # make a directory to store this run
                 out_dir = os.path.join(_path_archive, self.db_entry['_id'], self.name)
                 if not os.path.exists(out_dir):
@@ -3498,7 +3531,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     img_size = p[0].data.shape
 
                     # make 5 frames and median combine them to avoid selecting cosmic rays as the guide star
-                    print("Getting initial frame average")
+                    if _v:
+                        print("Getting initial frame average")
                     avg_imgs = np.zeros((5, img_size[0], img_size[1]))
 
                     for avg_n in range(0, 5):
@@ -3519,7 +3553,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                         self.db_entry['pipelined'][self.name]['classified_as'] = classified_as
                         raise RuntimeError('Something went horribly wrong')
 
-                    print(mid_portion.shape)
+                    if _v:
+                        print(mid_portion.shape)
 
                     mid_portion = ndimage.gaussian_filter(mid_portion, sigma=10)
 
@@ -3533,7 +3568,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     final_gs_y, final_gs_x = np.unravel_index(mid_portion.argmax(), mid_portion.shape)
                     final_gs_y += 60
                     final_gs_x += 60
-                    print("\tGuide star selected at:", final_gs_x, final_gs_y)
+                    if _v:
+                        print("\tGuide star selected at:", final_gs_x, final_gs_y)
 
                     # now guess the background region
                     final_bg_x = final_gs_x + gs_diam
@@ -3544,7 +3580,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     if final_bg_y > mid_portion.shape[0]:
                         final_bg_y = mid_portion.shape[0]
 
-                    print("\tGenerating S&A image")
+                    if _v:
+                        print("\tGenerating S&A image")
 
                     # now do a really simple S&A preview, using the selected guide star
                     # also track the SNR of the star to get an estimate for the
@@ -3605,9 +3642,11 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                             valid_snrs.append(s)
                     valid_snrs = sigma_clip(valid_snrs, 3, 2)
                     snr = np.average(valid_snrs)
-                    print("\tSNR: {:.1f}".format(snr))
+                    if _v:
+                        print("\tSNR: {:.1f}".format(snr))
 
-                    print("\tGenerating lucky settings file")
+                    if _v:
+                        print("\tGenerating lucky settings file")
                     # first find all the files for this target
                     extra_files = glob.glob(fn.rsplit(".", 1)[0] + "_?.fits")
                     all_files = [fn]
@@ -3646,7 +3685,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
                 for _file in raws:
-                    print('removing', _file)
+                    if _v:
+                        print('removing', _file)
                     os.remove(os.path.join(_file))
 
         elif part == 'bright_star_pipeline:preview':
@@ -4455,6 +4495,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                                                                                  self.db_entry['_id'], 'bright_star'))
             # convert to nearest integers
             cy0, cx0 = int(y_lock), int(x_lock)
+            if _v:
+                print('initial lock position:', cx0, cy0)
 
             # make sure win is not too close to image edge
             win = int(np.min([self.config['pipeline'][self.name]['win'], np.min([x_lock, x_size - x_lock]),
@@ -4538,6 +4580,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             im1 = self.calibrate_frame(im1, dark, flat, _iter=3)
             im1 = gaussian_filter(im1, sigma=5)  # 5, 10
             im1 = im1[cy0 - win: cy0 + win, cx0 - win: cx0 + win]
+
+            # export_fits(os.path.join(_path_out, self.db_entry['_id'] + '_pivot_win.fits'), im1)
 
             # frame_num x y ex ey:
             shifts = np.zeros((numFrames, 5))
@@ -4634,7 +4678,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
 
             cyf, cxf = self.image_center(_path=_path_out, _fits_name=self.db_entry['_id'] + '_summed.fits',
                                          _x0=cx0, _y0=cy0, _win=win)
-            print('Output lock position:', cxf, cyf)
+            if _v:
+                print('Output lock position:', cxf, cyf)
             with open(os.path.join(_path_out, 'shifts.txt'), 'w') as _f:
                 _f.write('# lock position: {:d} {:d}\n'.format(cxf, cyf))
                 _f.write('# frame_number x_shift[pix] y_shift[pix] ex_shift[pix] ey_shift[pix]\n')
@@ -4653,7 +4698,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
             for _file in raws:
-                print('removing', _file)
+                if _v:
+                    print('removing', _file)
                 os.remove(os.path.join(_file))
 
         elif part == 'faint_star_pipeline:preview':

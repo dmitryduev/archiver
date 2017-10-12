@@ -172,12 +172,14 @@
     },
 
     "faint_star": {
+      "upsampling_factor": 1,
       "win": 128,
       "n_threads": 4,
       "verbose": true,
 
       "help": {
         "self": "faint star processing pipeline",
+        "upsampling_factor": "output image Fourier up-sampling factor, int",
         "win": "window size",
         "n_threads": "number of threads to use in fftw",
         "verbose": "vocalize what's happening?"
