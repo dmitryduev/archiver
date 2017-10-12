@@ -2836,6 +2836,8 @@ class RoboaoPipeline(Pipeline):
             if _drizzled:
                 x *= 2.0
                 y *= 2.0
+            else:
+                _win = 50
             x, y = map(int, [x, y])
         elif _method == 'frames.txt':
             if _win is None:
@@ -3674,6 +3676,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     f100p = os.path.join(out_dir, '100p.fits')
                     if os.path.exists(f100p):
                         self.db_entry['pipelined'][self.name]['status']['done'] = True
+                        self.db_entry['pipelined'][self.name]['location'] = out_dir
                     else:
                         self.db_entry['pipelined'][self.name]['status']['done'] = False
                     self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
@@ -4353,16 +4356,16 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
         }
 
     def generate_preview(self, f_fits, path_obs, path_out):
-        # TODO:
         # load first image frame from the fits file
         preview_img = np.nan_to_num(load_fits(f_fits))
         # scale with local contrast optimization for preview:
         preview_img = self.scale_image(preview_img, correction='local')
         # cropped image [_win=None to try to detect]
+        _drizzled = False if self.config['pipeline'][self.name]['upsampling_factor'] == 1 else True
         preview_img_cropped, _x, _y = self.trim_frame(_path=path_obs,
                                                       _fits_name=os.path.split(f_fits)[1],
                                                       _win=None, _method='shifts.txt',
-                                                      _x=None, _y=None, _drizzled=True)
+                                                      _x=None, _y=None, _drizzled=_drizzled)
 
         # Strehl ratio (if available, otherwise will be None)
         SR = self.db_entry['pipelined'][self.name]['strehl']['ratio_percent']
@@ -4379,7 +4382,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
 
         self.preview(path_out, self.db_entry['_id'], preview_img, preview_img_cropped,
                      SR, _fow_x=self.config['telescope'][self.telescope]['fov_x'],
-                     _pix_x=_pix_x, _drizzled=False,
+                     _pix_x=_pix_x, _drizzled=_drizzled,
                      _x=_x, _y=_y)
 
     def generate_pca_preview(self, _path_out, _preview_img, _cc, _fow_x=36, _pix_x=1024, _drizzled=False):
@@ -4557,7 +4560,13 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                 print('Total number of frames to be registered: {:d}'.format(numFrames))
 
             # Sum of all (properly shifted) frames (with not too large a shift and chi**2)
-            summed_frame = np.zeros_like(summed_seeing_limited_frame, dtype=np.float)
+            _upsampling_factor = int(self.config['pipeline'][self.name]['upsampling_factor'])
+            # assert (type(_upsampling_factor) == int), '_upsampling_factor must be int'
+            if _upsampling_factor == 1:
+                summed_frame = np.zeros_like(summed_seeing_limited_frame, dtype=np.float)
+            else:
+                summed_frame = np.zeros((summed_seeing_limited_frame.shape[0] * _upsampling_factor,
+                                         summed_seeing_limited_frame.shape[1] * _upsampling_factor), dtype=np.float)
 
             # Pick a frame to align to
             # seeing-limited sum of all frames:
@@ -4581,6 +4590,10 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             im1 = gaussian_filter(im1, sigma=5)  # 5, 10
             im1 = im1[cy0 - win: cy0 + win, cx0 - win: cx0 + win]
 
+            # add resolution!
+            if _upsampling_factor != 1:
+                im1 = image_registration.fft_tools.upsample_image(im1, upsample_factor=_upsampling_factor)
+
             # export_fits(os.path.join(_path_out, self.db_entry['_id'] + '_pivot_win.fits'), im1)
 
             # frame_num x y ex ey:
@@ -4588,6 +4601,10 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
 
             # set up frequency grid for shift2d
             ny, nx = image_size
+            if _upsampling_factor != 1:
+                ny *= _upsampling_factor
+                nx *= _upsampling_factor
+
             xfreq_0 = np.fft.fftfreq(nx)[np.newaxis, :]
             yfreq_0 = np.fft.fftfreq(ny)[:, np.newaxis]
 
@@ -4615,6 +4632,11 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                         img_comp = img_comp[cy0 - win: cy0 + win, cx0 - win: cx0 + win]
                         # print(_time() - tic)
 
+                        # add resolution!
+                        if _upsampling_factor != 1:
+                            img_comp = image_registration.fft_tools.upsample_image(img_comp,
+                                                                                   upsample_factor=_upsampling_factor)
+
                         # tic = _time()
                         # chi2_shift -> chi2_shift_iterzoom
                         dy2, dx2, edy2, edx2 = image_registration.chi2_shift(im1, img_comp, nthreads=nthreads,
@@ -4625,7 +4647,13 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                         # note the order of dx and dy in shift2d vs shiftnd!!!
                         # img = image_registration.fft_tools.shiftnd(img, (-dx2, -dy2),
                         #                                            nthreads=_nthreads, use_numpy_fft=False)
-                        img = self.shift2d(fftn, ifftn, img, -dy2, -dx2, xfreq_0, yfreq_0)
+                        # img = self.shift2d(fftn, ifftn, img, -dy2, -dx2, xfreq_0, yfreq_0)
+                        if _upsampling_factor == 1:
+                            img = self.shift2d(fftn, ifftn, img, -dy2, -dx2, xfreq_0, yfreq_0)
+                        else:
+                            img = self.shift2d(fftn, ifftn, image_registration.fft_tools.upsample_image(img,
+                                                                                   upsample_factor=_upsampling_factor),
+                                          -dy2, -dx2, xfreq_0, yfreq_0)
                         # print(_time() - tic, '\n')
 
                         # if np.sqrt(dx2 ** 2 + dy2 ** 2) > 0.8 * _win \
@@ -4696,6 +4724,15 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_out,
                                '{:s}_summed.fits'.format(self.db_entry['_id']))).st_mtime)
             self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
+
+            self.db_entry['pipelined'][self.name]['location'] = _path_out
+
+            self.db_entry['pipelined'][self.name]['lock_position'] = [int(cxf), int(cyf)]
+
+            shifts_db = []
+            for l in shifts:
+                shifts_db.append([int(l[0])] + list(map(float, l[1:])))
+            self.db_entry['pipelined'][self.name]['shifts'] = shifts_db
 
             for _file in raws:
                 if _v:
