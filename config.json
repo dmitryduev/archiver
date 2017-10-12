@@ -136,6 +136,7 @@
           "self": "describe necessary conditions for observations to be pushed through pipeline. key: valid DB field, value: valid python expression"
         }
       },
+      "verbose": true,
       "high_contrast": {
         "path_psf_reference_library": "/Users/dmitryduev/_caltech/roboao/_archive/psf_library.fits",
         "win": 100,
@@ -173,10 +174,13 @@
     "faint_star": {
       "win": 128,
       "n_threads": 4,
+      "verbose": true,
+
       "help": {
         "self": "faint star processing pipeline",
         "win": "window size",
-        "n_threads": "number of threads to use in fftw"
+        "n_threads": "number of threads to use in fftw",
+        "verbose": "vocalize what's happening?"
       }
     },
 

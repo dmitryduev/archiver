@@ -15,10 +15,13 @@ import numpy as np
 from scipy.optimize import fmin
 from astropy.modeling import models, fitting
 import scipy.ndimage as ndimage
+from scipy.stats import sigmaclip
+from scipy.ndimage import gaussian_filter
+import image_registration
 import vip
 import photutils
 from scipy import stats
-import operator
+# import operator
 import glob
 import traceback
 import sys
@@ -35,6 +38,7 @@ import hashlib
 from skimage import exposure, img_as_float
 from copy import deepcopy
 import sewpy
+import lacosmicx as lax
 from matplotlib.patches import Rectangle
 from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
 
@@ -1008,7 +1012,7 @@ class RoboaoArchiver(Archiver):
                                                          _db_entry=argdict['db_entry'], _task_hash=_task_hash)
 
             elif argdict['task'] == 'faint_star_pipeline:strehl':
-                result = {'status': 'error', 'message': 'not implemented yet'}
+                result = {'status': 'error', 'message': 'not implemented'}
 
             elif argdict['task'] == 'faint_star_pipeline:pca':
                 result = {'status': 'error', 'message': 'not implemented yet'}
@@ -2074,17 +2078,18 @@ class RoboaoObservation(Observation):
                 return _task
 
         # FSP?
-        ''' Bright star pipeline '''
+        ''' Faint star pipeline '''
         pipe = RoboaoFaintStarPipeline(_config=self.config, _db_entry=self.db_entry)
         # check conditions necessary to run (defined in config.json):
         go = pipe.check_necessary_conditions()
-        # print('{:s} FSP go: '.format(self.id), go)
+        # print('{:s} FSP ok to go: '.format(self.id), go)
 
         # good to go?
         if go:
             # should and can run FSP pipeline itself?
             _part = 'faint_star_pipeline'
             go = pipe.check_conditions(part=_part)
+            # print('{:s} FSP go: '.format(self.id), go)
             if go:
                 # mark enqueued
                 pipe.db_entry['pipelined']['{:s}'.format(pipe.name)]['status']['enqueued'] = True
@@ -2497,6 +2502,129 @@ class RoboaoPipeline(Pipeline):
         raise NotImplementedError
 
     @staticmethod
+    def shift2d(fftn, ifftn, data, deltax, deltay, xfreq_0, yfreq_0,
+                return_abs=False, return_real=True):
+        """
+        2D version: obsolete - use ND version instead
+        (though it's probably easier to parse the source of this one)
+
+        FFT-based sub-pixel image shift.
+        Will turn NaNs into zeros
+
+        Shift Theorem:
+
+        .. math::
+            FT[f(t-t_0)](x) = e^{-2 \pi i x t_0} F(x)
+
+
+        Parameters
+        ----------
+        data : np.ndarray
+            2D image
+        """
+
+        xfreq = deltax * xfreq_0
+        yfreq = deltay * yfreq_0
+        freq_grid = xfreq + yfreq
+
+        kernel = np.exp(-1j * 2 * np.pi * freq_grid)
+
+        result = ifftn(fftn(data) * kernel)
+
+        if return_real:
+            return np.real(result)
+        elif return_abs:
+            return np.abs(result)
+        else:
+            return result
+
+    @staticmethod
+    def image_center(_path, _fits_name, _x0=None, _y0=None, _win=None):
+
+        # extract sources
+        sew = sewpy.SEW(params=["X_IMAGE", "Y_IMAGE", "XPEAK_IMAGE", "YPEAK_IMAGE",
+                                "A_IMAGE", "B_IMAGE", "FWHM_IMAGE", "FLAGS"],
+                        config={"DETECT_MINAREA": 10, "PHOT_APERTURES": "10", 'DETECT_THRESH': '5.0'},
+                        sexpath="sex")
+
+        out = sew(os.path.join(_path, _fits_name))
+        # sort by FWHM
+        out['table'].sort('FWHM_IMAGE')
+        # descending order
+        out['table'].reverse()
+
+        # print(out['table'])  # This is an astropy table.
+
+        # get first 10 and score them:
+        scores = []
+        # search everywhere in the image?
+        if _x0 is None and _y0 is None and _win is None:
+            # maximum error of a Gaussian fit. Real sources usually have larger 'errors'
+            gauss_error_max = [np.max([sou['A_IMAGE'] for sou in out['table'][0:10]]),
+                               np.max([sou['B_IMAGE'] for sou in out['table'][0:10]])]
+            for sou in out['table'][0:10]:
+                if sou['FWHM_IMAGE'] > 1:
+                    score = (log_gauss_score(sou['FWHM_IMAGE']) +
+                             gauss_score(rho(sou['X_IMAGE'], sou['Y_IMAGE'])) +
+                             np.mean([sou['A_IMAGE'] / gauss_error_max[0],
+                                      sou['B_IMAGE'] / gauss_error_max[1]])) / 3.0
+                else:
+                    score = 0  # it could so happen that reported FWHM is 0
+                scores.append(score)
+        # search around (_x0, _y0) in a window of width _win
+        else:
+            for sou in out['table'][0:10]:
+                _r = rho(sou['X_IMAGE'], sou['Y_IMAGE'], x_0=_x0, y_0=_y0)
+                if sou['FWHM_IMAGE'] > 1 and _r < _win:
+                    score = gauss_score(_r)
+                else:
+                    score = 0  # it could so happen that reported FWHM is 0
+                scores.append(score)
+
+        # there was something to score? get the best score then
+        if len(scores) > 0:
+            best_score = np.argmax(scores)
+            x_center = out['table']['YPEAK_IMAGE'][best_score]
+            y_center = out['table']['XPEAK_IMAGE'][best_score]
+        # somehow no sources detected? but _x0 and _y0 set? return the latter then
+        elif _x0 is not None and _y0 is not None:
+            x_center, y_center = _x0, _y0
+        # no sources detected and _x0 and _y0 not set? return the simple maximum:
+        else:
+            scidata = fits.open(os.path.join(_path, _fits_name))[0].data
+            x_center, y_center = np.unravel_index(scidata.argmax(), scidata.shape)
+
+        return x_center, y_center
+
+    # @timeout(seconds_before_timeout=10)
+    def load_darks_and_flats(self, _path_calib, _mode, _filt, image_size_x=1024):
+        """
+            Load darks and flats
+        :param _date:
+        :param _mode:
+        :param _filt:
+        :param image_size_x:
+        :return:
+        """
+
+        if image_size_x == 256:
+            # quarter frame observing mode
+            dark_image = os.path.join(_path_calib, 'dark_{:s}4.fits'.format(str(_mode)))
+        else:
+            dark_image = os.path.join(_path_calib, 'dark_{:s}.fits'.format(str(_mode)))
+        flat_image = os.path.join(_path_calib, 'flat_{:s}.fits'.format(_filt))
+
+        if not os.path.exists(dark_image) or not os.path.exists(flat_image):
+            raise Exception('Could not find calibration (some) data for {:s}'.format(_date))
+        else:
+            with fits.open(dark_image) as dark, fits.open(flat_image) as flat:
+                # replace NaNs if necessary
+                if image_size_x == 256:
+                    return np.nan_to_num(dark[0].data), np.nan_to_num(flat[0].data[384:640, 384:640])
+                else:
+                    return np.nan_to_num(dark[0].data), np.nan_to_num(flat[0].data)
+
+    @staticmethod
     def scale_image(image, correction='local'):
         """
 
@@ -2568,6 +2696,30 @@ class RoboaoPipeline(Pipeline):
                     break
 
         return _x, _y
+
+    @staticmethod
+    def get_best_pipe_frame(_path):
+        """
+            Get file and frame numbers with the highest Strehl for lucky-pipelined data
+        :param _path:
+        :return:
+        """
+        try:
+            with open(os.path.join(_path, 'sorted.txt'), 'r') as _f:
+                f_lines = _f.readlines()
+            _tmp = f_lines[1].split()[-1]
+            frame_num = int(re.search(r'.fits\[(\d+)\]', _tmp).group(1))
+            file_num_pattern = re.search(r'_(\d+).fits', _tmp)
+            # is it the first file? its number 0:
+            if file_num_pattern is None:
+                file_num = 0
+            # no? then from blabla_n.fits its number is n+1
+            else:
+                file_num = int(file_num_pattern.group(1)) + 1
+            return file_num, frame_num
+        except Exception as _e:
+            print(_e)
+            return -1, -1
 
     @classmethod
     def trim_frame(cls, _path, _fits_name, _win=100, _method='sextractor', _x=None, _y=None, _drizzled=True):
@@ -2959,17 +3111,18 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
         """
         go = True
 
-        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
-            if field_name != 'help':
-                # build proper dict reference expression
-                keys = field_name.split('.')
-                expr = 'self.db_entry'
-                for key in keys:
-                    expr += "['{:s}']".format(key)
-                # get condition
-                condition = eval(expr + ' ' + field_condition)
-                # eval condition
-                go = go and condition
+        if 'go' in self.config['pipeline'][self.name]:
+            for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
+                if field_name != 'help':
+                    # build proper dict reference expression
+                    keys = field_name.split('.')
+                    expr = 'self.db_entry'
+                    for key in keys:
+                        expr += "['{:s}']".format(key)
+                    # get condition
+                    condition = eval(expr + ' ' + field_condition)
+                    # eval condition
+                    go = go and condition
 
         return go
 
@@ -3954,7 +4107,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             :param _db_entry: observation DB entry
         """
         ''' initialize super class '''
-        super(RoboaoBrightStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
+        super(RoboaoFaintStarPipeline, self).__init__(_config=_config, _db_entry=_db_entry)
 
         # pipeline name. This goes to 'pipelined' field of obs DB entry
         self.name = 'faint_star'
@@ -3971,17 +4124,18 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
         """
         go = True
 
-        for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
-            if field_name != 'help':
-                # build proper dict reference expression
-                keys = field_name.split('.')
-                expr = 'self.db_entry'
-                for key in keys:
-                    expr += "['{:s}']".format(key)
-                # get condition
-                condition = eval(expr + ' ' + field_condition)
-                # eval condition
-                go = go and condition
+        if 'go' in self.config['pipeline'][self.name]:
+            for field_name, field_condition in self.config['pipeline'][self.name]['go'].items():
+                if field_name != 'help':
+                    # build proper dict reference expression
+                    keys = field_name.split('.')
+                    expr = 'self.db_entry'
+                    for key in keys:
+                        expr += "['{:s}']".format(key)
+                    # get condition
+                    condition = eval(expr + ' ' + field_condition)
+                    # eval condition
+                    go = go and condition
 
         return go
 
@@ -4002,6 +4156,9 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             # BSP go and done?
             _bsp_go_and_done = ('bright_star' in self.db_entry['pipelined']) and \
                self.db_entry['pipelined']['bright_star']['status']['done']
+            # BSP done and not failed/zero flux? don't want to waste computational resources on such
+            _bsp_not_failed = _bsp_go_and_done and \
+              (self.db_entry['pipelined']['bright_star']['classified_as'] not in ('failed', 'zero_flux'))
 
             # force redo requested?
             _force_redo = self.db_entry['pipelined'][self.name]['status']['force_redo']
@@ -4010,12 +4167,12 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             # how many times tried?
             _num_tries = self.db_entry['pipelined'][self.name]['status']['retries']
 
-            go = (_bsp_no_go or _bsp_go_and_done) and \
+            go = (_bsp_no_go or (_bsp_go_and_done and _bsp_not_failed)) and \
                  (_force_redo or ((not _done) and (_num_tries <= self.config['misc']['max_retries'])))
 
             return go
 
-        # Preview generation for the results of BSP processing?
+        # Preview generation for the results of FSP processing?
         elif part == 'faint_star_pipeline:preview':
 
             # pipeline done?
@@ -4032,7 +4189,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
 
             return go
 
-        # Strehl calculation for the results of BSP processing?
+        # Strehl calculation for the results of FSP processing?
         elif part == 'faint_star_pipeline:strehl':
 
             # # pipeline done?
@@ -4257,6 +4414,9 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
         # TODO:
         assert part is not None, 'must specify part to execute'
 
+        # verbose?
+        _v = self.config['pipeline'][self.name]['verbose']
+
         # UTC date of obs:
         _date = self.db_entry['date_utc'].strftime('%Y%m%d')
 
@@ -4266,6 +4426,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
         _path_raw = os.path.join(self.db_entry['raw_data']['location'][1], _date)
         # path to archive:
         _path_archive = os.path.join(self.config['path']['path_archive'], _date)
+        # path to output:
+        _path_out = os.path.join(_path_archive, self.db_entry['_id'], self.name)
         # path to calibration data produced by lucky pipeline:
         _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
 
@@ -4282,8 +4444,202 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             raws = [os.path.join(_path_tmp, os.path.splitext(_f)[0]) for _f in _raws_zipped]
 
             ''' go off with processing '''
-            # TODO:
-            raise NotImplementedError
+            # get frame size
+            x_size = self.db_entry['fits_header']['NAXIS1'][0]
+            y_size = self.db_entry['fits_header']['NAXIS2'][0]
+
+            # get x_lock, y_lock from BSP! Can do that here, will need to copy code over from there,
+            # so that's basically to save time.
+            # will cut a window around x_lock, y_lock of size win to do image registration
+            x_lock, y_lock = self.get_xy_from_pipeline_settings_txt(os.path.join(_path_archive,
+                                                                                 self.db_entry['_id'], 'bright_star'))
+            # convert to nearest integers
+            cy0, cx0 = int(y_lock), int(x_lock)
+
+            # make sure win is not too close to image edge
+            win = int(np.min([self.config['pipeline'][self.name]['win'], np.min([x_lock, x_size - x_lock]),
+                              np.min([y_lock, y_size - y_lock])]))
+            # use highest-Strehl frame to align individual frames to:
+            pivot = self.get_best_pipe_frame(os.path.join(_path_archive, self.db_entry['_id'], 'bright_star'))
+
+            files_sizes = [os.stat(fs).st_size for fs in raws]
+
+            # get total number of frames to allocate
+            # bar = pyprind.ProgBar(sum(files_sizes), stream=1, title='Getting total number of frames')
+            # number of frames in each fits file
+            n_frames_files = []
+            for jj, _file in enumerate(raws):
+                with fits.open(_file) as _hdulist:
+                    if jj == 0:
+                        # get image size (this would be (1024, 1024) for the Andor camera)
+                        image_size = _hdulist[0].shape
+                    n_frames_files.append(len(_hdulist))
+                    # bar.update(iterations=files_sizes[jj])
+            # total number of frames
+            numFrames = sum(n_frames_files)
+
+            # Stack to seeing-limited image
+            if _v:
+                bar = pyprind.ProgBar(sum(files_sizes), stream=1, title='Stacking to seeing-limited image')
+            summed_seeing_limited_frame = np.zeros((image_size[0], image_size[1]), dtype=np.float)
+            for jj, _file in enumerate(raws):
+                # print(jj)
+                with fits.open(_file) as _hdulist:
+                    # frames_before = sum(n_frames_files[:jj])
+                    for ii, _ in enumerate(_hdulist):
+                        summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+                        # print(ii + frames_before, '\n', _data[ii, :, :])
+                if _v:
+                    bar.update(iterations=files_sizes[jj])
+
+            # remove cosmic rays:
+            if _v:
+                print('removing cosmic rays from the seeing limited image')
+            summed_seeing_limited_frame = \
+            lax.lacosmicx(np.ascontiguousarray(summed_seeing_limited_frame, dtype=np.float32),
+                          sigclip=20, sigfrac=0.3, objlim=5.0,
+                          gain=1.0, readnoise=6.5, satlevel=65536.0, pssl=0.0, niter=4,
+                          sepmed=True, cleantype='meanmask', fsmode='median',
+                          psfmodel='gauss', psffwhm=2.5, psfsize=7, psfk=None,
+                          psfbeta=4.765, verbose=False)[1]
+
+            # load darks and flats
+            if _v:
+                print('Loading darks and flats')
+            dark, flat = self.load_darks_and_flats(_path_calib, self.db_entry['fits_header']['MODE_NUM'][0],
+                                                   self.db_entry['filter'], image_size[0])
+            if dark is None or flat is None:
+                raise Exception('Could not open darks and flats')
+
+            if _v:
+                print('Total number of frames to be registered: {:d}'.format(numFrames))
+
+            # Sum of all (properly shifted) frames (with not too large a shift and chi**2)
+            summed_frame = np.zeros_like(summed_seeing_limited_frame, dtype=np.float)
+
+            # Pick a frame to align to
+            # seeing-limited sum of all frames:
+            if _v:
+                print(pivot)
+            if pivot == (-1, -1):
+                im1 = deepcopy(summed_seeing_limited_frame)
+                print('using seeing-limited image as pivot frame')
+            else:
+                try:
+                    with fits.open(raws[pivot[0]]) as _hdulist:
+                        im1 = np.array(np.nan_to_num(_hdulist[pivot[1]].data), dtype=np.float)
+                    print('using frame {:d} from raw fits-file #{:d} as pivot frame'.format(*pivot[::-1]))
+                except Exception as _e:
+                    print(_e)
+                    im1 = deepcopy(summed_seeing_limited_frame)
+                    print('using seeing-limited image as pivot frame')
+
+            # print(im1.shape, dark.shape, flat.shape)
+            im1 = self.calibrate_frame(im1, dark, flat, _iter=3)
+            im1 = gaussian_filter(im1, sigma=5)  # 5, 10
+            im1 = im1[cy0 - win: cy0 + win, cx0 - win: cx0 + win]
+
+            # frame_num x y ex ey:
+            shifts = np.zeros((numFrames, 5))
+
+            # set up frequency grid for shift2d
+            ny, nx = image_size
+            xfreq_0 = np.fft.fftfreq(nx)[np.newaxis, :]
+            yfreq_0 = np.fft.fftfreq(ny)[:, np.newaxis]
+
+            nthreads = self.config['pipeline'][self.name]['n_threads']
+            fftn, ifftn = image_registration.fft_tools.fast_ffts.get_ffts(
+                                nthreads=nthreads, use_numpy_fft=False)
+
+            if _v:
+                bar = pyprind.ProgBar(numFrames, stream=1, title='Registering frames')
+
+            fn = 0
+            # from time import time as _time
+            for jj, _file in enumerate(raws):
+                with fits.open(_file) as _hdulist:
+                    # frames_before = sum(n_frames_files[:jj])
+                    for ii, _ in enumerate(_hdulist):
+                        img = np.array(np.nan_to_num(_hdulist[ii].data), dtype=np.float)  # do proper casting
+
+                        # tic = _time()
+                        img = self.calibrate_frame(img, dark, flat, _iter=3)
+                        # print(_time()-tic)
+
+                        # tic = _time()
+                        img_comp = gaussian_filter(img, sigma=5)
+                        img_comp = img_comp[cy0 - win: cy0 + win, cx0 - win: cx0 + win]
+                        # print(_time() - tic)
+
+                        # tic = _time()
+                        # chi2_shift -> chi2_shift_iterzoom
+                        dy2, dx2, edy2, edx2 = image_registration.chi2_shift(im1, img_comp, nthreads=nthreads,
+                                                                             upsample_factor='auto', zeromean=True)
+                        # print(dx2, dy2, edx2, edy2)
+                        # print(_time() - tic)
+                        # tic = _time()
+                        # note the order of dx and dy in shift2d vs shiftnd!!!
+                        # img = image_registration.fft_tools.shiftnd(img, (-dx2, -dy2),
+                        #                                            nthreads=_nthreads, use_numpy_fft=False)
+                        img = self.shift2d(fftn, ifftn, img, -dy2, -dx2, xfreq_0, yfreq_0)
+                        # print(_time() - tic, '\n')
+
+                        # if np.sqrt(dx2 ** 2 + dy2 ** 2) > 0.8 * _win \
+                        #     or np.sqrt(edx2 ** 2 + edy2 ** 2) > 0.5:
+                        if np.sqrt(dx2 ** 2 + dy2 ** 2) > 0.8 * win:
+                            # skip frames with too large a shift
+                            pass
+                            # print(' # {:d} shift was too big: '.format(i),
+                            #       np.sqrt(shifts[i, 1] ** 2 + shifts[i, 2] ** 2), shifts[i, 1], shifts[i, 2])
+                        else:
+                            # otherwise store the shift values and add to the 'integrated' image
+                            shifts[fn, :] = [fn, -dx2, -dy2, edx2, edy2]
+                            summed_frame += img
+
+                        if _v:
+                            bar.update()
+
+                        # increment frame number
+                        fn += 1
+
+            if _v:
+                print('Largest move was {:.2f} pixels for frame {:d}'.
+                      format(np.max(np.sqrt(shifts[:, 1] ** 2 + shifts[:, 2] ** 2)),
+                             np.argmax(np.sqrt(shifts[:, 1] ** 2 + shifts[:, 2] ** 2))))
+
+            # remove cosmic rays:
+            if _v:
+                print('removing cosmic rays from the stacked image')
+            summed_frame = lax.lacosmicx(np.ascontiguousarray(summed_frame, dtype=np.float32),
+                                         sigclip=20, sigfrac=0.3, objlim=5.0,
+                                         gain=1.0, readnoise=6.5, satlevel=65536.0, pssl=0.0, niter=4,
+                                         sepmed=True, cleantype='meanmask', fsmode='median',
+                                         psfmodel='gauss', psffwhm=2.5, psfsize=7, psfk=None,
+                                         psfbeta=4.765, verbose=False)[1]
+
+            # output
+            if not os.path.exists(_path_out):
+                os.makedirs(os.path.join(_path_out))
+
+            # get original fits header for output
+            header = self.db_entry['fits_header']
+
+            # save seeing-limited
+            export_fits(os.path.join(_path_out, self.db_entry['_id'] + '_simple_sum.fits'),
+                        summed_seeing_limited_frame, header)
+
+            # save stacked
+            export_fits(os.path.join(_path_out, self.db_entry['_id'] + '_summed.fits'),
+                        summed_frame, header)
+
+            cyf, cxf = self.image_center(_path=_path_out, _fits_name=self.db_entry['_id'] + '_summed.fits',
+                                         _x0=cx0, _y0=cy0, _win=win)
+            print('Output lock position:', cxf, cyf)
+            with open(os.path.join(_path_out, 'shifts.txt'), 'w') as _f:
+                _f.write('# lock position: {:d} {:d}\n'.format(cxf, cyf))
+                _f.write('# frame_number x_shift[pix] y_shift[pix] ex_shift[pix] ey_shift[pix]\n')
+                for _i, _x, _y, _ex, _ey in shifts:
+                    _f.write('{:.0f} {:.3f} {:.3f} {:.3f} {:.3f}\n'.format(_i, _x, _y, _ex, _ey))
 
             # reduction successful? prepare db entry for update
             self.db_entry['pipelined'][self.name]['status']['done'] = True
@@ -4292,7 +4648,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             self.db_entry['pipelined'][self.name]['status']['retries'] += 1
 
             # set last_modified as 100p.fits modified date:
-            time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir,
+            time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_out,
                                '{:s}_summed.fits'.format(self.db_entry['_id']))).st_mtime)
             self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
@@ -4300,7 +4656,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                 print('removing', _file)
                 os.remove(os.path.join(_file))
 
-        elif part == 'bright_star_pipeline:preview':
+        elif part == 'faint_star_pipeline:preview':
             # generate previews
             path_obs = os.path.join(_path_archive, self.db_entry['_id'], self.name)
             f_fits = os.path.join(path_obs, '{:s}_summed.fits'.format(self.db_entry['_id']))
@@ -4314,20 +4670,116 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             self.db_entry['pipelined'][self.name]['preview']['last_modified'] = \
                 self.db_entry['pipelined'][self.name]['last_modified']
 
-        elif part == 'bright_star_pipeline:strehl':
+        elif part == 'faint_star_pipeline:strehl':
             # compute strehl
             raise NotImplementedError
 
-        elif part == 'bright_star_pipeline:pca':
+        elif part == 'faint_star_pipeline:pca':
             # run high-contrast pipeline
             raise NotImplementedError
 
-        elif part == 'bright_star_pipeline:pca:preview':
+        elif part == 'faint_star_pipeline:pca:preview':
             # generate previews for high-contrast pipeline
             raise NotImplementedError
 
         else:
             raise RuntimeError('unknown pipeline part')
+
+    @staticmethod
+    def calibrate_frame(im, _dark, _flat, _iter=3):
+        im_BKGD = deepcopy(im)
+        for j in range(int(_iter)):  # do 3 iterations of sigma-clipping
+            try:
+                temp = sigmaclip(im_BKGD, 3.0, 3.0)
+                im_BKGD = temp[0]  # return arr is 1st element
+            except Exception as _e:
+                print(_e)
+                pass
+        sum_BKGD = np.mean(im_BKGD)  # average CCD BKGD
+        im -= sum_BKGD
+        im -= _dark
+        im /= _flat
+
+        return im
+
+
+def job_faint_star_pipeline(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoFaintStarPipeline(_config=_config, _db_entry=_db_entry)
+        # run the pipeline
+        pip.run(part='faint_star_pipeline')
+
+        return {'_id': _id, 'job': 'faint_star_pipeline', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.faint_star': pip.db_entry['pipelined']['faint_star']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['faint_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoFaintStarPipeline.init_status()
+        # retries++
+        _status['status']['retries'] += 1
+        _status['status']['enqueued'] = False
+        _status['status']['force_redo'] = False
+        _status['status']['done'] = False
+        _status['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'faint_star_pipeline', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.faint_star': _status
+                                     }}
+                                     )
+                }
+
+
+def job_faint_star_pipeline_preview(_id=None, _config=None, _db_entry=None, _task_hash=None):
+    try:
+        # init pipe here again. [as it's not JSON serializable]
+        pip = RoboaoFaintStarPipeline(_config=_config, _db_entry=_db_entry)
+        pip.run(part='faint_star_pipeline:preview')
+
+        return {'_id': _id, 'job': 'faint_star_pipeline:preview', 'hash': _task_hash,
+                'status': 'ok', 'message': str(datetime.datetime.now()),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.{:s}.preview'.format(pip.name):
+                                             pip.db_entry['pipelined']['faint_star']['preview']
+                                     }}
+                                     )
+                }
+    except Exception as _e:
+        traceback.print_exc()
+        try:
+            _status = _db_entry['pipelined']['faint_star']
+        except Exception as _ee:
+            print(str(_ee))
+            traceback.print_exc()
+            # failed? flush status:
+            _status = RoboaoFaintStarPipeline.init_status()
+        # retries++
+        _status['preview']['retries'] += 1
+        _status['preview']['done'] = False
+        _status['preview']['force_redo'] = False
+        _status['preview']['last_modified'] = utc_now()
+        return {'_id': _id, 'job': 'faint_star_pipeline:preview', 'hash': _task_hash,
+                'status': 'error', 'message': str(_e),
+                'db_record_update': ({'_id': _id},
+                                     {'$set': {
+                                         'pipelined.faint_star.preview': _status['preview']
+                                     }}
+                                     )
+                }
 
 
 if __name__ == '__main__':
