@@ -1287,7 +1287,7 @@ def query_db(search_form, _coll, _program_ids, _user_id):
         try:
             val = search_form[key]
             if len(val) > 0:
-                rng = map(float, val.split(','))
+                rng = list(map(float, val.split(',')))
                 # print(key, rng)
                 assert rng[0] <= rng[1], 'invalid range for {:s}'.format(key)
                 if key == 'azimuth':

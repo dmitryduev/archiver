@@ -460,27 +460,27 @@
                                     <label class="checkbox-inline">
                                         <input type="checkbox" id="pipe_lucky"
                                                name="pipe_lucky" data-toggle="tooltip" data-placement="top"
-                                               title="strictly done if checked"> Lucky
+                                               title="strictly done if checked"> BSP
                                     </label>
                                     <label class="checkbox-inline">
                                         <input type="checkbox" id="pipe_lucky_pca"
                                                name="pipe_lucky_pca" data-toggle="tooltip" data-placement="top"
-                                               title="strictly done if checked"> PCA for lucky
+                                               title="strictly done if checked"> PCA for BSP
                                     </label>
                                     <label class="checkbox-inline">
                                         <input type="checkbox" id="pipe_faint"
                                                name="pipe_faint" data-toggle="tooltip" data-placement="top"
-                                               title="strictly done if checked"> Faint
+                                               title="strictly done if checked"> FSP
                                     </label>
                                     <label class="checkbox-inline">
                                         <input type="checkbox" id="pipe_faint_pca"
                                                name="pipe_faint_pca" data-toggle="tooltip" data-placement="top"
-                                               title="strictly done if checked"> PCA for faint
+                                               title="strictly done if checked"> PCA for FSP
                                     </label>
                                     <label class="checkbox-inline">
                                         <input type="checkbox" id="pipe_planetary"
                                                name="pipe_planetary" data-toggle="tooltip" data-placement="top"
-                                               title="strictly done if checked"> Planetary
+                                               title="strictly done if checked"> EOP
                                     </label>
                                 </div>
                             </div>
@@ -734,12 +734,12 @@
                                                     <span class="label label-default">None</span>
                                                 {% endif %}
                                             </td>
-                                            {% for key in ('automated', 'faint')%}
+                                            {% for key in ('bright_star', 'faint_star')%}
                                                 {# set up classes for color-coding the badges #}
                                                 {% set class_pipe = 'success' if
                                                 object['pipelined'][key]['status']['done'] else 'danger' %}
                                                 {# being recomputed? #}
-                                                {% if key == 'faint' and (object['pipelined'][key]['status']['force_redo']
+                                                {% if key == 'faint_star' and (object['pipelined'][key]['status']['force_redo']
                                                 or object['pipelined'][key]['status']['enqueued']) %}
                                                     {% set class_pipe = 'warning' %}
                                                 {% endif %}
@@ -754,7 +754,7 @@
                                                 {# pipelined? #}
                                                 <td>
                                                     {# jedi master can use force to force redo! #}
-                                                    {% if user == 'admin' and key == 'faint' %}
+                                                    {% if user == 'admin' and key == 'faint_star' %}
                                                         <span style="cursor: pointer;"
                                                               onclick="forceRedo('{{ object['_id'] }}', '{{ key }}');">
                                                     {% endif %}
@@ -854,18 +854,18 @@
                                             </td>
                                             {# display modal with preview stuff #}
                                             <td>
-                                                {% if object['pipelined']['automated']['status']['done'] or
-                                                        object['pipelined']['faint']['status']['done'] %}
+                                                {% if object['pipelined']['bright_star']['status']['done'] or
+                                                        object['pipelined']['faint_star']['status']['done'] %}
                                                     <a href="#" data-toggle="modal" data-target="#sourceModal"
                                                        data-date="{{object['date_utc'].strftime('%Y%m%d')}}"
                                                        data-source="{{ object['_id'] }}"
                                                        data-sou_name="{{ object['name'] }}"
-                                                       data-lucky="{{ object['pipelined']['automated']['preview']['done'] }}"
-                                                       data-lucky-strehl="{{ object['pipelined']['automated']['strehl']['status']['done'] }}"
-                                                       data-lucky-pca="{{ object['pipelined']['automated']['pca']['preview']['done'] }}"
-                                                       data-faint="{{ object['pipelined']['faint']['preview']['done'] }}"
-                                                       data-faint-strehl="{{ object['pipelined']['faint']['strehl']['status']['done'] }}"
-                                                       data-faint-pca="{{ object['pipelined']['faint']['pca']['preview']['done'] }}">
+                                                       data-lucky="{{ object['pipelined']['bright_star']['preview']['done'] }}"
+                                                       data-lucky-strehl="{{ object['pipelined']['bright_star']['strehl']['status']['done'] }}"
+                                                       data-lucky-pca="{{ object['pipelined']['bright_star']['pca']['preview']['done'] }}"
+                                                       data-faint="{{ object['pipelined']['faint_star']['preview']['done'] }}"
+                                                       data-faint-strehl="{{ object['pipelined']['faint_star']['strehl']['status']['done'] }}"
+                                                       data-faint-pca="{{ object['pipelined']['faint_star']['pca']['preview']['done'] }}">
                                                     <span class="glyphicon glyphicon-play-circle" style="font-size: 11px"></span></a>
                                                 {% else %}
                                                     <span class="label label-default">None</span>
@@ -896,18 +896,18 @@
                                 {# previews in the flesh #}
                                 <div id="preview_images" style="margin-top: 10px;">
                                     {% for object in obs %}
-                                        {% if (object['pipelined']['automated']['status']['done'] and
-                                                object['pipelined']['automated']['classified_as'] != 'failed') or
-                                                object['pipelined']['faint']['status']['done'] %}
+                                        {% if (object['pipelined']['bright_star']['status']['done'] and
+                                                object['pipelined']['bright_star']['classified_as'] != 'failed') or
+                                                object['pipelined']['faint_star']['status']['done'] %}
                                             {% set date = object['date_utc'].strftime('%Y%m%d') %}
                                             <div class="img-wrapper">
-                                                {% if object['pipelined']['automated']['status']['done'] %}
-                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/automated/preview/{{object['_id']}}_cropped.png"
+                                                {% if object['pipelined']['bright_star']['status']['done'] %}
+                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/bright_star/preview/{{object['_id']}}_cropped.png"
                                                          alt="{{ object['_id'] }}"
                                                          style="height:120px; cursor: pointer; margin-bottom: 3px;"
                                                          class="preview">
-                                                {% elif object['pipelined']['faint']['status']['done'] %}
-                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/faint/preview/{{object['_id']}}_cropped.png"
+                                                {% elif object['pipelined']['faint_star']['status']['done'] %}
+                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/faint_star/preview/{{object['_id']}}_cropped.png"
                                                          alt="{{ object['_id'] }}"
                                                          style="height:120px; cursor: pointer;"
                                                          class="preview">
@@ -916,12 +916,12 @@
                                                      data-date="{{date}}"
                                                      data-source="{{ object['_id'] }}"
                                                      data-sou_name="{{ object['name'] }}"
-                                                     data-lucky="{{ object['pipelined']['automated']['preview']['done'] }}"
-                                                     data-lucky-strehl="{{ object['pipelined']['automated']['strehl']['status']['done'] }}"
-                                                     data-lucky-pca="{{ object['pipelined']['automated']['pca']['preview']['done'] }}"
-                                                     data-faint="{{ object['pipelined']['faint']['preview']['done'] }}"
-                                                     data-faint-strehl="{{ object['pipelined']['faint']['strehl']['status']['done'] }}"
-                                                     data-faint-pca="{{ object['pipelined']['faint']['pca']['preview']['done'] }}"
+                                                     data-lucky="{{ object['pipelined']['bright_star']['preview']['done'] }}"
+                                                     data-lucky-strehl="{{ object['pipelined']['bright_star']['strehl']['status']['done'] }}"
+                                                     data-lucky-pca="{{ object['pipelined']['bright_star']['pca']['preview']['done'] }}"
+                                                     data-faint="{{ object['pipelined']['faint_star']['preview']['done'] }}"
+                                                     data-faint-strehl="{{ object['pipelined']['faint_star']['strehl']['status']['done'] }}"
+                                                     data-faint-pca="{{ object['pipelined']['faint_star']['pca']['preview']['done'] }}"
                                                      style="cursor: pointer;">
                                                      {{object['name']}}<br>
                                                      Camera: {{object['camera']}}<br>
@@ -934,8 +934,8 @@
                                     <br>
                                     <p style="margin-top: 10px;">
                                     {% for object in obs %}
-                                        {% if object['pipelined']['automated']['status']['done'] and
-                                                object['pipelined']['automated']['classified_as'] == 'failed' %}
+                                        {% if object['pipelined']['bright_star']['status']['done'] and
+                                                object['pipelined']['bright_star']['classified_as'] == 'failed' %}
                                             {{ object['_id'] }}: failed<br>
                                         {% endif %}
                                     {% endfor %}
@@ -994,11 +994,11 @@
                     <ul class="nav nav-tabs" role="tablist">
                         <li role="presentation" class="active">
                             <a href="#luckyImagesTab" aria-controls="luckyImagesTab"
-                               role="tab" data-toggle="tab">Lucky pipeline</a>
+                               role="tab" data-toggle="tab">Bright star pipeline</a>
                         </li>
                         <li role="presentation">
                             <a href="#faintImagesTab" aria-controls="faintImagesTab"
-                               role="tab" data-toggle="tab">Faint pipeline</a>
+                               role="tab" data-toggle="tab">Faint star pipeline</a>
                         </li>
                         <li role="presentation">
                             <a href="#headerTab" aria-controls="headerTab"
@@ -1097,6 +1097,10 @@
                                 </div>
                             </div>
                             <div class="row">
+                                <div class="col-md-6" id="ps1_i" style="display: none">
+                                    <h5>PS1 (i filter) [1'x1']:</h5>
+                                    <img id="ps1_i_image" src="" style="width:100%;">
+                                </div>
                                 <div class="col-md-6" id="dss2_r" style="display: none">
                                     <h5>DSS2 (r filter) [1'x1']:</h5>
                                     <img id="dss2_r_image" src="" style="width:100%;" data-toggle="magnify">
@@ -1474,6 +1478,7 @@ $(function() {
 
     // clear tab with external images
     function clearExternalImages() {
+        $('#ps1_i').hide();
         $('#dss2_r').hide();
         $('#2mass_h').hide();
     }
@@ -1566,18 +1571,18 @@ $(function() {
             $('#luckyImagesTabContent').show();
             $('#luckyImagesTabEmpty').hide();
             modal.find('#lucky_sou_full').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/automated/preview/' + source + '_full.png');
+                    source + '/bright_star/preview/' + source + '_full.png');
             modal.find('#lucky_sou_cropped').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/automated/preview/' + source + '_cropped.png');
+                    source + '/bright_star/preview/' + source + '_cropped.png');
             // pca
             if (JSON.parse(lucky_pca.toLowerCase())) {
                 $('#lucky_sou_pca_label').show();
                 $('#lucky_sou_pca').show();
                 modal.find('#lucky_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/automated/pca/' + source + '_pca.png');
+                    source + '/bright_star/pca/' + source + '_pca.png');
                 $('#lucky_sou_cc').show();
                 modal.find('#lucky_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/automated/pca/' + source + '_contrast_curve.png');
+                    source + '/bright_star/pca/' + source + '_contrast_curve.png');
             }
             else {
                 $('#lucky_sou_pca_label').hide();
@@ -1604,18 +1609,18 @@ $(function() {
             $('#faintImagesTabContent').show();
             $('#faintImagesTabEmpty').hide();
             modal.find('#faint_sou_full').attr('src', '{{-script_root-}}/data/'+date+'/'+
-                    source+'/faint/preview/'+source+'_full.png');
+                    source+'/faint_star/preview/'+source+'_full.png');
             modal.find('#faint_sou_cropped').attr('src', '{{-script_root-}}/data/'+date+'/'+
-                    source+'/faint/preview/'+source+'_cropped.png');
+                    source+'/faint_star/preview/'+source+'_cropped.png');
             // pca
             if (JSON.parse(faint_pca.toLowerCase())) {
                 $('#faint_sou_pca_label').show();
                 $('#faint_sou_pca').show();
                 modal.find('#faint_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/faint/pca/' + source + '_pca.png');
+                    source + '/faint_star/pca/' + source + '_pca.png');
                 $('#faint_sou_cc').show();
                 modal.find('#faint_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
-                    source + '/faint/pca/' + source + '_contrast_curve.png');
+                    source + '/faint_star/pca/' + source + '_contrast_curve.png');
             }
             else {
                 $('#faint_sou_pca_label').hide();
