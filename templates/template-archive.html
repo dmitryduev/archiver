@@ -1,0 +1,917 @@
+{% extends "template.html" %}
+{% block body %}
+<body>
+
+<!-- Fixed navbar -->
+<nav class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed"
+                    data-toggle="collapse" data-target="#navbar"
+                    aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="{{-script_root-}}/">Robo-AO data archive</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+            <ul class="nav navbar-nav">
+                <li class="active"><a href="{{-script_root-}}/">Data</a></li>
+                <li><a href="{{-script_root-}}/search">Search</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown">
+                    <a href="#" class="dropdown-toggle" data-toggle="dropdown"
+                       role="button" aria-haspopup="true" aria-expanded="false">Logged in as
+                        <strong><span class="text-info">{{ user }}</span></strong> <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                        {# administration tasks #}
+                        {% if user == 'admin' %}
+                            <li><a href="{{-script_root-}}/manage_users">Manage users</a></li>
+                            <li><a href="{{-script_root-}}/manage_psflib">Manage PSF library</a></li>
+                            {# Manage reobserving requests #}
+                            {#<li><a href="manage_requests">Manage requests</a></li> #}
+                            <li class='disabled'><a href="#">Manage requests</a></li>
+                            {# View system logs #}
+                            {#<li><a href="view_logs">View logs</a></li>#}
+                            <li class='disabled'><a href="#">View logs</a></li>
+                        {% endif %}
+                        <li><a href="{{-script_root-}}/logout">Log out</a></li>
+                    </ul>
+                </li>
+
+            </ul>
+        </div><!--/.nav-collapse -->
+    </div>
+</nav>
+
+<!-- Main section -->
+
+<!--
+<div class="container">
+    <h1>Hi {{ user }}</h1><br>
+</div>
+-->
+
+{# content is streamed date by date from the server #}
+{% if dates %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-8">
+                <h2>
+                    Nightly data
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-info dropdown-toggle"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Toggle view <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a href="#" onclick="showAll(0)">Data preview</a></li>
+                            <li><a href="#" onclick="showAll(1)">Auxiliary data</a></li>
+                            <li><a href="#" onclick="showAll(2)">Download</a></li>
+                            {# TODO: #}
+                            <li><a href="#" onclick="showAll(3)">Summary table</a></li>
+                        </ul>
+                    </div>
+                </h2>
+            </div>
+            <div class="col-md-4">
+                <h2>
+                    <div class="form-group">
+                        <div class="input-group">
+                            <input type="text" name="daterange" id="daterange" class="form-control"
+                               style="cursor: pointer"/>
+                            <span class="input-group-addon" style="cursor: pointer" onclick="$('#daterange').click();">
+                                <span class="glyphicon glyphicon-calendar"></span>
+                            </span>
+                        </div>
+                    </div>
+                </h2>
+            </div>
+        </div>
+    </div>
+
+    {% for date, programs, aux in dates %}
+
+        {# No science/aux data for the requested period at all #}
+        {% if None in (date, programs, aux) %}
+
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="alert alert-warning alert-dismissible fade in" role="alert" id="alert-no-data">
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                            No science data to show for the requested date(s).
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <br>
+        {% elif programs | length > 0 or aux | length > 0 %}
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-12">
+                        <h3 style="color: #286090">{{ date[:4]+'/' + date[4:6]+'/' + date[6:] }}</h3>
+
+                        <div class="data-tabs">
+
+                            <!-- Nav tabs -->
+                            <ul class="nav nav-tabs" role="tablist" id="{{ date }}-nav-tabs">
+                                {% if programs | length == 0 and aux | length != 0 %}
+                                    <li role="presentation" id="{{ date }}-nav-tabs-preview">
+                                {% else %}
+                                    <li role="presentation" class="active" id="{{ date }}-nav-tabs-preview">
+                                {% endif %}
+                                    <a href="#{{ date }}-preview" aria-controls="{{ date }}-preview"
+                                       role="tab" data-toggle="tab">Data preview</a>
+                                </li>
+                                {% if programs | length == 0 and aux | length != 0 %}
+                                    <li role="presentation" class="active" id="{{ date }}-nav-tabs-auxiliary">
+                                {% else %}
+                                    <li role="presentation" id="{{ date }}-nav-tabs-auxiliary">
+                                {% endif %}
+                                    <a href="#{{ date }}-auxiliary" aria-controls="{{ date }}-auxiliary"
+                                       role="tab" data-toggle="tab">Auxiliary data</a>
+                                </li>
+                                <li role="presentation" id="{{ date }}-nav-tabs-data">
+                                    <a href="#{{ date }}-data" aria-controls="{{ date }}-data"
+                                       role="tab" data-toggle="tab">Download</a>
+                                </li>
+                            </ul>
+
+                            <!-- Tab panes -->
+                            <div class="tab-content">
+                                {% if programs | length == 0 %}
+                                    <div role="tabpanel" class="tab-pane" id="{{ date }}-preview">
+                                        <h4>No science data</h4>
+                                    </div>
+                                {% else %}
+                                    <div role="tabpanel" class="tab-pane active" id="{{ date }}-preview">
+                                        {# toggle summary info #}
+                                        <button type="button" class="btn btn-default btn-xs"
+                                                style="margin-top:10px;" onClick="toggle_summary({{ date }})">
+                                            Toggle summary
+                                        </button>
+                                        {% for program in programs|sort %}
+                                            <h4>Program {{ program }}</h4>
+                                            <div id="program_{{program}}_images">
+                                            {% for obs in programs[program] %}
+                                                {% if (obs['pipelined']['bright_star']['status']['done'] and
+                                                        obs['pipelined']['bright_star']['classified_as'] != 'failed') or
+                                                        obs['pipelined']['faint_star']['status']['done'] %}
+                                                    <div class="img-wrapper">
+                                                        {% if obs['pipelined']['bright_star']['status']['done'] %}
+                                                            <img src="{{-script_root-}}/data/{{date}}/{{obs['_id']}}/bright_star/preview/{{obs['_id']}}_cropped.png"
+                                                                 alt="{{ obs['_id'] }}"
+                                                                 style="height:120px; cursor: pointer; margin-bottom: 3px;">
+                                                        {% elif obs['pipelined']['faint_star']['status']['done'] %}
+                                                            <img src="{{-script_root-}}/data/{{date}}/{{obs['_id']}}/faint_star/preview/{{obs['_id']}}_cropped.png"
+                                                                 alt="{{ obs['_id'] }}"
+                                                                 style="height:120px; cursor: pointer;">
+                                                        {% endif %}
+                                                        <div class="overlay" data-toggle="modal" data-target="#sourceModal"
+                                                             data-date="{{date}}" data-source="{{ obs['_id'] }}"
+                                                             data-sou_name="{{ obs['name'] }}"
+                                                             data-lucky="{{ obs['pipelined']['bright_star']['preview']['done'] }}"
+                                                             data-lucky-strehl="{{ obs['pipelined']['bright_star']['strehl']['status']['done'] }}"
+                                                             data-lucky-pca="{{ obs['pipelined']['bright_star']['pca']['preview']['done'] }}"
+                                                             data-faint="{{ obs['pipelined']['faint_star']['preview']['done'] }}"
+                                                             data-faint-strehl="{{ obs['pipelined']['faint_star']['strehl']['status']['done'] }}"
+                                                             data-faint-pca="{{ obs['pipelined']['faint_star']['pca']['preview']['done'] }}"
+                                                             style="cursor: pointer;">
+                                                             {{obs['name']}}<br>
+                                                             Camera: {{obs['camera']}}<br>
+                                                             Filter: {{obs['filter']}}
+                                                            <br>{{obs['date_utc']}}
+                                                        </div>
+                                                    </div>
+                                                {% endif %}
+                                            {% endfor %}
+                                            <br>
+                                            <p style="margin-top: 10px;">
+                                            {% for obs in programs[program] %}
+                                                {% if obs['pipelined']['bright_star']['status']['done'] and
+                                                        obs['pipelined']['bright_star']['classified_as'] == 'failed' %}
+                                                    {{ obs['_id'] }}: failed<br>
+                                                {% endif %}
+                                            {% endfor %}
+                                            </p>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+
+                                {% if aux | length == 0 %}
+                                    <div role="tabpanel" class="tab-pane" id="{{ date }}-auxiliary">
+                                        <h4>No system performance and meteo data</h4>
+                                    </div>
+                                {% else %}
+                                    {# make pane active if there's no science data #}
+                                    {% if programs | length == 0 %}
+                                        <div role="tabpanel" class="tab-pane active" id="{{ date }}-auxiliary">
+                                    {% else %}
+                                        <div role="tabpanel" class="tab-pane" id="{{ date }}-auxiliary">
+                                    {% endif %}
+                                        <h4>System performance and meteo data</h4>
+                                        {% for aux_key in aux %}
+                                            {% if aux[aux_key]['done'] %}
+                                                {# pull seeing data together #}
+                                                {% if aux_key == 'seeing' %}
+                                                    <div class="col-md-12">
+                                                {% endif %}
+                                                <div class="col-md-6">
+                                                    <h5>{{ aux_key }}</h5>
+                                                    <img src="{{-script_root-}}/data/{{date}}/summary/{{ aux_key }}.{{date}}.png"
+                                                         alt="{{ aux_key }}" class="img-responsive pop"
+                                                         style="cursor:pointer; cursor: hand;">
+                                                </div>
+                                                {# pull seeing data together: #}
+                                                {% if aux_key == 'seeing' %}
+                                                    <div class="col-md-6">
+                                                        <h5>{{ aux_key }} movie [data, model, residuals]</h5>
+                                                        <div id="seeingCarousel{{ date }}" class="carousel carousel-fade"
+                                                             data-interval="300" data-pause="false" style="width:100%"
+                                                             onmouseover="pauseCarouselShow('{{ date }}');"
+                                                             onmouseleave="pauseCarouselHide('{{ date }}');">
+                                                            <div class="carousel-inner">
+                                                                <div class="item active">
+                                                                    {% set fi0 = aux[aux_key]['frames'][0] %}
+                                                                    {% set datestr = fi0[:fi0.index('.')].split('_')[-2:] %}
+                                                                    {% set dat  = datestr[0][0:4]+'/'+
+                                                                                        datestr[0][4:6]+'/'+datestr[0][6:] %}
+                                                                    {% set time = datestr[1][0:2]+':'+
+                                                                                        datestr[1][2:4]+':'+datestr[1][4:] %}
+                                                                    <img src="{{-script_root-}}/data/{{date}}/summary/seeing/{{fi0}}"
+                                                                         alt="" class="img-responsive">
+                                                                    <div class="carousel-caption"
+                                                                         style="position:absolute !important; top:-5%;
+                                                                                padding-bottom: 0px;">
+                                                                        {{dat}}&nbsp;{{time}}</div>
+                                                                </div>
+                                                                {% for fi in aux[aux_key]['frames'][1:] %}
+                                                                    <div class="item">
+                                                                        {% set datestr = fi[:fi.index('.')].split('_')[-2:] %}
+                                                                        {% set dat  = datestr[0][0:4]+'/'+
+                                                                                        datestr[0][4:6]+'/'+datestr[0][6:] %}
+                                                                        {% set time = datestr[1][0:2]+':'+
+                                                                                        datestr[1][2:4]+':'+datestr[1][4:] %}
+                                                                        <img src="{{-script_root-}}/data/{{date}}/summary/seeing/{{fi}}"
+                                                                             alt="" class="img-responsive">
+                                                                        <div class="carousel-caption"
+                                                                             style="position:absolute !important; top:-5%">
+                                                                            {{dat}}&nbsp;{{time}}</div>
+                                                                    </div>
+                                                                {% endfor %}
+                                                            </div>
+
+                                                            <a class="left carousel-control" href="#seeingCarousel{{ date }}"
+                                                               data-slide="prev">
+                                                                <span class="glyphicon glyphicon-chevron-left"></span>
+                                                            </a>
+                                                            <a class="right carousel-control" href="#seeingCarousel{{ date }}"
+                                                               data-slide="next">
+                                                                <span class="glyphicon glyphicon-chevron-right"></span>
+                                                            </a>
+
+                                                            <a id="carousel-play{{ date }}"
+                                                               class="carousel-control carouselButtons"
+                                                               onclick="playCarousel('{{ date }}')"
+                                                               style="display: block">
+                                                                    <span class="glyphicon glyphicon-play"
+                                                                          style="font-size: 40px !important;"></span>
+                                                            </a>
+                                                            <a id="carousel-pause{{ date }}"
+                                                               class="carousel-control carouselButtons"
+                                                               onclick="pauseCarousel('{{ date }}')"
+                                                               style="display: none">
+                                                                    <span class="glyphicon glyphicon-pause"
+                                                                          style="font-size: 40px !important;"></span>
+                                                            </a>
+                                                        </div>
+                                                    </div>
+
+                                                    </div>
+                                                {% endif %}
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                <div role="tabpanel" class="tab-pane" id="{{ date }}-data">
+                                    {% if programs | length == 0 %}
+                                        <h4>No science data for download</h4>
+                                    {% else %}
+                                        {% for program in programs|sort %}
+                                            <h4>Program {{ program }}</h4>
+                                            Master wget-script to fetch all data:
+                                            <abbr title="Dont't forget to 'chmod u+x'">
+                                                <a href="{{-script_root-}}/get_data?date={{ date }}&program={{ program }}">
+                                                    program_{{ program }}_{{ date }}.wget.sh
+                                                </a><br>
+                                            </abbr>
+                                            <a data-toggle="collapse" href="#collapse_{{ date }}_{{ program }}"
+                                               aria-expanded="false" aria-controls="collapse_{{ date }}_{{ program }}">
+                                                Individual compressed tarballs
+                                                <span class="glyphicon glyphicon-triangle-bottom"
+                                                      aria-hidden="true" style="font-size: 9px;"></span>
+                                            </a>
+                                            <div class="collapse" id="collapse_{{ date }}_{{ program }}">
+                                                <blockquote style="font-size: 14px;">
+                                                    <p>
+                                                        {% for obs in programs[program] %}
+                                                            {# check if bz2 exists: #}
+                                                            {% if obs['distributed']['status'] %}
+                                                                <a href="{{-script_root-}}/data/{{ date }}/{{ obs['_id'] }}/{{ obs['_id'] }}.tar.bz2">
+                                                                    {{ obs['_id'] }}.tar.bz2
+                                                                </a><br>
+                                                            {% else %}
+                                                                {{ obs['_id'] }}: not ready yet<br>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                    </p>
+                                                </blockquote>
+                                            </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    {% endfor %}
+{% else %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <h1>No science data to show</h1>
+            </div>
+        </div>
+    </div>
+{% endif %}
+<br>
+
+<footer class="footer">
+    <div class="container">
+        <p class="text-muted" id="years">&copy; Robo-AO 2016-{{ current_year }}</p>
+    </div>
+</footer>
+
+
+<!-- Modal template to display aux images -->
+<div class="modal fade" id="aux_image_modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal">
+                    <span aria-hidden="true">&times;</span><span class="sr-only">Close</span>
+                </button>
+                <h4 class="modal-title"></h4>
+            </div>
+            <div class="modal-body">
+                <img src="" id="aux_image_preview" style="width: 100%;" >
+            </div>
+{#            <div class="modal-footer">#}
+{#                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>#}
+{#            </div>#}
+        </div>
+    </div>
+</div>
+
+
+<!-- Modal template to display preview images -->
+<div class="modal fade" id="sourceModal" tabindex="-1" role="dialog" aria-labelledby="ModalLabel">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"
+                        aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="ModalLabel">Object name</h4>
+            </div>
+            <div class="modal-body">
+                <div style="display:none;" id="modalSourceName"></div>
+                <div id="sourceTabs">
+                    <!-- Nav tabs -->
+                    <ul class="nav nav-tabs" role="tablist">
+                        <li role="presentation" class="active">
+                            <a href="#luckyImagesTab" aria-controls="luckyImagesTab"
+                               role="tab" data-toggle="tab">Bright star pipeline</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#faintImagesTab" aria-controls="faintImagesTab"
+                               role="tab" data-toggle="tab">Faint star pipeline</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#headerTab" aria-controls="headerTab"
+                               role="tab" data-toggle="tab">Header</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#externalImagesTab" aria-controls="externalImagesTab"
+                               role="tab" data-toggle="tab">External images of the field</a>
+                        </li>
+                    </ul>
+
+                    <!-- Tab panes -->
+                    <div class="tab-content">
+                        <!--Lucky data-->
+                        <div role="tabpanel" class="tab-pane active" id="luckyImagesTab">
+                            <div class="row" id="luckyImagesTabContent" style="display:none;">
+                                <div class="col-md-6">
+                                    <h5>Full-size</h5>
+                                    <img id="lucky_sou_full" src="" style="width: 100%;" data-toggle="magnify">
+                                    <br><br>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="col-xs-6">
+                                        <h5 id="lucky_sou_cropped_label">Cropped</h5>
+                                        <img id="lucky_sou_cropped" src="" style="width:100%;" data-toggle="magnify">
+                                    </div>
+                                    <div class="col-xs-6">
+                                        <h5 id="lucky_sou_pca_label" style="display:none;">PSF-subtracted</h5>
+                                        <img id="lucky_sou_pca" src="" style="display:none; width:100%;" 
+                                             data-toggle="magnify">
+                                    </div>
+                                    <img id="lucky_sou_cc" src="" style="display:none; width:100%;">
+                                </div>
+                            </div>
+                            <div class="row" id="luckyImagesTabEmpty" style="display: none">
+                                <div class="col-md-12">
+                                    <h4>No data to show</h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--Faint data-->
+                        <div role="tabpanel" class="tab-pane" id="faintImagesTab">
+                            <div class="row" id="faintImagesTabContent" style="display:none;">
+                                <div class="col-md-6">
+                                    <h5>Full-size</h5>
+                                    <img id="faint_sou_full" src="" style="width: 100%;" data-toggle="magnify">
+                                    <br><br>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="col-xs-6">
+                                        <h5 id="faint_sou_cropped_label">Cropped</h5>
+                                        <img id="faint_sou_cropped" src="" style="width:100%;" data-toggle="magnify">
+                                    </div>
+                                    <div class="col-xs-6">
+                                        <h5 id="faint_sou_pca_label" style="display:none;">PSF-subtracted</h5>
+                                        <img id="faint_sou_pca" src="" style="display:none; width:100%;"
+                                             data-toggle="magnify">
+                                    </div>
+                                    <img id="faint_sou_cc" src="" style="display:none; width:100%;">
+                                </div>
+                            </div>
+                            <div class="row" id="faintImagesTabEmpty" style="display: none">
+                                <div class="col-md-12">
+                                    <h4>No data to show</h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--FITS header-->
+                        <div role="tabpanel" class="tab-pane" id="headerTab">
+                            <div class="row">
+                                <div class="col-md-12" id="headerTabLoading">
+                                    <p style="margin-top:10px;">
+                                        Loading...&nbsp;<i class="fa fa-gear fa-spin" style="font-size:24px"></i>
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <h5>FITS header</h5>
+                                    <table class="table table-striped table-hover table-condensed"
+                                           id="headerTable">
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--External images-->
+                        <div role="tabpanel" class="tab-pane" id="externalImagesTab">
+                            <div class="row">
+                                <div class="col-md-12" id="externalImagesTabLoading">
+                                    <p style="margin-top:10px;">
+                                        Loading...&nbsp;<i class="fa fa-gear fa-spin" style="font-size:24px"></i>
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6" id="ps1_i" style="display: none">
+                                    <h5>PS1 (i filter) [1'x1']:</h5>
+                                    <img id="ps1_i_image" src="" style="width:100%;">
+                                </div>
+                                <div class="col-md-6" id="dss2_r" style="display: none">
+                                    <h5>DSS2 (r filter) [1'x1']:</h5>
+                                    <img id="dss2_r_image" src="" style="width:100%;" class="img-flip">
+                                </div>
+                                <div class="col-md-6" id="2mass_h" style="display: none">
+                                    <h5>2MASS (H filter) [1'x1']:</h5>
+                                    <img id="2mass_h_image" src="" style="width:100%;" class="img-flip">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+
+
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="previewModalDonloadLink" style="float: left">Download all source data</a>
+                <button type="button" class="btn btn-success" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scroll to top -->
+<a id="back-to-top" href="#" class="btn btn-primary btn-md back-to-top"
+   role="button" title="Click to return on the top page"
+   data-toggle="tooltip" data-placement="left">
+    <span class="glyphicon glyphicon-chevron-up"></span>
+</a>
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-magnify.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-notify.js"></script>
+<script src="{{-script_root-}}/static/js/moment.min.js"></script>
+<script src="{{-script_root-}}/static/js/daterangepicker.js"></script>
+
+<script>
+    // for AJAX requests [absolute website's uri]:
+    $SCRIPT_ROOT = {{ request.script_root|tojson|safe }};
+
+    // switch tabs
+    $(document).ready(function() {
+        $('.data-tabs li a').click(function (e) {
+            e.preventDefault();
+            $(this).tab('show')
+        });
+    });
+
+    // switch tabs
+    function showAll(tabn) {
+        var arr = $("[id$=-nav-tabs]");
+        for (var i=0; i<arr.length; i++) {
+            $('#' + arr[i].id + ' li:eq(' + tabn + ') a').tab('show');
+        }
+    }
+
+    // toggle summary info
+    function toggle_summary(date) {
+        $('div[data-date='+date+']').each(function() {
+            $(this).toggleClass('overlay overlay-show');
+        });
+        //$('[data-date]').toggleClass('overlay overlay-show');
+    }
+
+    $(document).ready(function() {
+        $(".img-wrapper").hover(
+            function () {
+                $(this).find('div[data-date]').toggleClass('overlay overlay-show');
+                //$(this).find('div[data-date]').toggle()
+            }
+        )
+    });
+</script>
+<script>
+$(document).ready(function(){
+    $(window).scroll(function () {
+        if ($(this).scrollTop() > 50) {
+            $('#back-to-top').fadeIn();
+        }
+        else {
+            $('#back-to-top').fadeOut();
+        }
+    });
+    // scroll body to 0px on click
+    $('#back-to-top').click(function () {
+        $('#back-to-top').tooltip('hide');
+        $('body,html').animate({
+            scrollTop: 0
+        }, 300);
+        return false;
+    });
+
+    $('#back-to-top').tooltip('show');
+
+});
+</script>
+<script>
+$(".pop").on("click", function() {
+    $('#aux_image_preview').attr('src', $(this).attr('src'));
+    $('#aux_image_modal').modal('show');
+});
+</script>
+<script>
+function playCarousel(date) {
+{#    $('.carousel').carousel('cycle');#}
+    $('#seeingCarousel'+date).carousel('cycle');
+    $('#carousel-play'+date).hide();
+}
+function pauseCarousel(date) {
+{#    $('.carousel').carousel('pause');#}
+    $('#seeingCarousel'+date).carousel('pause');
+    $('#carousel-pause'+date).hide();
+    $('#carousel-play'+date).show();
+}
+function pauseCarouselShow(date) {
+    if ($('#carousel-play'+date).css('display') == 'none') {
+        $('#carousel-pause'+date).show();
+    }
+}
+function pauseCarouselHide(date) {
+    $('#carousel-pause'+date).hide();
+}
+</script>
+
+<script>
+    // clear table with FITS header (in case it's not empty) before displaying current table
+    function clearTable() {
+        $('#headerTable').html('');
+    }
+
+    // send AJAX GET request to server to get source FITS header
+    function getHeader(source) {
+        $.getJSON($SCRIPT_ROOT + '/_get_fits_header', {
+            source: source
+        }, function(data) {
+            var header = data.result;
+            $('#headerTabLoading').hide();
+            for (var key in header) {
+                if (key != 'COMMENT') {
+                    var $formrow = '<tr><td>'+key+'</td>'+
+                            '<td>'+header[key][0]+'</td>'+
+                            '<td>'+header[key][1]+'</td>'+'</tr>';
+                    $('#headerTable').append($formrow);
+                }
+            }
+        });
+        return false;
+    }
+
+    // clear tab with external images
+    function clearExternalImages() {
+        $('#ps1_i').hide();
+        $('#dss2_r').hide();
+        $('#2mass_h').hide();
+    }
+
+    // send AJAX GET request to server to get source FITS header
+    function getExternalImages(source) {
+        $.getJSON($SCRIPT_ROOT + '/_get_vo_image', {
+            source: source
+        }, function(data) {
+            var images = data.result;
+            $('#externalImagesTabLoading').hide();
+            for (var key in images) {
+                $('#'+key).show();
+                $('#'+key+'_image').attr('src', 'data:image/png;base64,' + images[key])
+            }
+        });
+        return false;
+    }
+
+    // Build modal with source data on-the-fly
+    $('#sourceModal').on('show.bs.modal', function (event) {
+        // show images tab by default:
+        $('#sourceTabs a[href="#luckyImagesTab"]').tab('show'); // Select tab by name
+
+        var trigger = $(event.relatedTarget); // Who triggered the modal? [to extract source info]
+        // Extract info from data-* attributes
+        var date = trigger.data('date'); // date of observation
+        var source = trigger.data('source'); // full source name (including prog_num, filt etc)
+        var lucky = trigger.data('lucky'); // lucky data?
+        var lucky_strehl = trigger.data('lucky-strehl'); // lucky data?
+        var lucky_pca = trigger.data('lucky-pca'); // lucky data?
+        var faint = trigger.data('faint'); // lucky data?
+        var faint_strehl = trigger.data('faint-strehl'); // lucky data?
+        var faint_pca = trigger.data('faint-pca'); // lucky data?
+
+        // download link:
+        $('#previewModalDonloadLink').attr('href', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/' + source + '.tar.bz2');
+
+        //var cc = trigger.data('cc'); // type of contrast curve
+        // Strehl
+        //var core = trigger.data('core'); // type of contrast curve
+        //var halo = trigger.data('halo'); // type of contrast curve
+        //var fwhm = trigger.data('fwhm'); // type of contrast curve
+        //var sr_flag = trigger.data('sr_flag'); // type of contrast curve
+        // If necessary, you could initiate an AJAX request here (and then do the updating in a callback).
+        // Update the modal's content. We'll use jQuery here,
+        // but one could use a data binding library or other methods instead.
+        var modal = $(this);
+        modal.find('.modal-title').text(source);
+        // lucky pipeline
+        if (JSON.parse(lucky.toLowerCase())) {
+            $('#luckyImagesTabContent').show();
+            $('#luckyImagesTabEmpty').hide();
+            modal.find('#lucky_sou_full').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/bright_star/preview/' + source + '_full.png');
+            modal.find('#lucky_sou_cropped').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/bright_star/preview/' + source + '_cropped.png');
+            // pca
+            if (JSON.parse(lucky_pca.toLowerCase())) {
+                $('#lucky_sou_pca_label').show();
+                $('#lucky_sou_pca').show();
+                modal.find('#lucky_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/bright_star/pca/' + source + '_pca.png');
+                $('#lucky_sou_cc').show();
+                modal.find('#lucky_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/bright_star/pca/' + source + '_contrast_curve.png');
+            }
+            else {
+                $('#lucky_sou_pca_label').hide();
+                $('#lucky_sou_pca').hide();
+                modal.find('#lucky_sou_pca').attr('src', '');
+                $('#lucky_sou_cc').hide();
+                modal.find('#lucky_sou_cc').attr('src', '');
+            }
+            // strehl
+            if (JSON.parse(lucky_strehl.toLowerCase())) {
+
+            }
+            else {
+
+            }
+        }
+        else {
+            $('#luckyImagesTabContent').hide();
+            $('#luckyImagesTabEmpty').show();
+        }
+
+        // faint pipeline
+        if (JSON.parse(faint.toLowerCase())) {
+            $('#faintImagesTabContent').show();
+            $('#faintImagesTabEmpty').hide();
+            modal.find('#faint_sou_full').attr('src', '{{-script_root-}}/data/'+date+'/'+
+                    source+'/faint_star/preview/'+source+'_full.png');
+            modal.find('#faint_sou_cropped').attr('src', '{{-script_root-}}/data/'+date+'/'+
+                    source+'/faint_star/preview/'+source+'_cropped.png');
+            // pca
+            if (JSON.parse(faint_pca.toLowerCase())) {
+                $('#faint_sou_pca_label').show();
+                $('#faint_sou_pca').show();
+                modal.find('#faint_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/faint_star/pca/' + source + '_pca.png');
+                $('#faint_sou_cc').show();
+                modal.find('#faint_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/faint_star/pca/' + source + '_contrast_curve.png');
+            }
+            else {
+                $('#faint_sou_pca_label').hide();
+                $('#faint_sou_pca').hide();
+                modal.find('#faint_sou_pca').attr('src', '');
+                $('#faint_sou_cc').hide();
+                modal.find('#faint_sou_cc').attr('src', '');
+            }
+            // strehl
+            if (JSON.parse(faint_strehl.toLowerCase())) {
+
+            }
+            else {
+
+            }
+        }
+        else {
+            $('#faintImagesTabContent').hide();
+            $('#faintImagesTabEmpty').show();
+        }
+
+        // prepare to generate table with header data
+        clearTable();
+        $('#headerTabLoading').show();
+{#        getHeader(source);#}
+
+        // prepare to fetch external vo images of the field
+        clearExternalImages();
+        $('#externalImagesTabLoading').show();
+{#        getExternalImages(source);#}
+
+        // set source name inside a hidden div in the modal to be picked by async loading functions
+        $('#modalSourceName').data('source', source);
+    });
+    // tabs in the modal
+    $('#sourceTabs a').click(function (e) {
+        e.preventDefault();
+        $(this).tab('show')
+    });
+    // load FITS header on tab show only to minimize unwanted traffic:
+    $('a[href="#headerTab"]').on('shown.bs.tab', function (event) {
+        getHeader($('#modalSourceName').data('source'));
+    });
+    // load external stuff on tab show only to minimize unwanted traffic:
+    $('a[href="#externalImagesTab"]').on('shown.bs.tab', function (event) {
+{#        var target = $(event.target).attr("href"); // activated tab#}
+{#        alert($('#modalSourceName').data('source'));#}
+        getExternalImages($('#modalSourceName').data('source'));
+    });
+
+</script>
+
+{# daterangepicker #}
+<script type="text/javascript">
+$(function() {
+
+    var start = moment().utc().subtract(9, 'days').startOf('day');
+    var end = moment().utc();
+
+    function cb(start, end) {
+        $('#daterange').val(start.format('MMMM D, YYYY') + ' - ' + end.format('MMMM D, YYYY'));
+    }
+
+    $('#daterange').daterangepicker({
+        startDate: start,
+        endDate: end,
+        timePicker: true,
+        timePicker24Hour: true,
+        timePickerIncrement: 5,
+        locale: {
+            format: 'MMMM D, YYYY'
+        },
+        ranges: {
+           'Today': [moment().utc().startOf('day'), moment().utc().add(1, 'days').startOf('day')],
+           'Yesterday': [moment().utc().subtract(1, 'days').startOf('day'),
+                         moment().utc().startOf('day')],
+           'Last 7 Days': [moment().utc().subtract(6, 'days').startOf('day'),
+                           moment().utc().add(1, 'days').startOf('day')],
+           'Last 30 Days': [moment().utc().subtract(29, 'days').startOf('day'),
+                            moment().utc().add(1, 'days').startOf('day')],
+           'This Month': [moment().utc().startOf('month'),
+                          moment().utc().endOf('month')],
+           'Last Month': [moment().utc().subtract(1, 'month').startOf('month'),
+                          moment().utc().subtract(1, 'month').endOf('month')],
+           'Everything': [moment('20151001', 'YYYYMMDD'), moment().utc()]
+        },
+        minDate: moment('20151001', 'YYYYMMDD'),
+        maxDate: moment('20200101', 'YYYYMMDD'),
+        opens: "left"
+    }, cb);
+
+    cb(start, end);
+
+    $('#daterange').on('apply.daterangepicker', function(ev, picker) {
+        var start = picker.startDate.format('YYYYMMDD');
+        var stop = picker.endDate.format('YYYYMMDD');
+        window.location.href = "?start=" + start + "&stop=" + stop;
+    });
+
+});
+</script>
+
+{# show flashing messages #}
+<script>
+    function showFlashingMessage(title, message, type) {
+        $.notify({title: title, message: message},
+            {placement: {
+                from: "bottom",
+                align: "right"
+            },
+                type: type,
+                template: '<div data-notify="container" class="col-xs-11 col-sm-3 alert alert-{0}" role="alert" ' +
+                'style="max-width:300px">' +
+                '<button type="button" aria-hidden="true" class="close" data-notify="dismiss">×</button>' +
+                '<span data-notify="icon"></span> ' +
+                '<span data-notify="title">{1}</span> ' +
+                '<span data-notify="message">{2}</span>' +
+                '<div class="progress" data-notify="progressbar">' +
+                '<div class="progress-bar progress-bar-{0}" role="progressbar" aria-valuenow="0" ' +
+                'aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>' +
+                '</div>' +
+                '<a href="{3}" target="{4}" data-notify="url"></a>' +
+                '</div>'
+                                    });
+}
+{% if messages | length > 0 %}
+    $(document).ready(function() {
+        {% for message in messages %}
+            showFlashingMessage('Info:', '{{ message[0] }}', '{{ message[1] }}');
+        {% endfor %}
+    });
+{% endif %}
+</script>
+
+{# propagate date ranges #}
+{% if request.args.get('start') != None and request.args.get('stop') != None %}
+<script>
+    $(document).ready(function() {
+        $('#daterange').data('daterangepicker').setStartDate(moment('{{ request.args.get('start') }}', 'YYYYMMDD'));
+        $('#daterange').data('daterangepicker').setEndDate(moment('{{ request.args.get('stop') }}', 'YYYYMMDD'));
+    });
+</script>
+{% endif %}
+</body>
+{% endblock %}

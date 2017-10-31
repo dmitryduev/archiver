@@ -1,0 +1,177 @@
+{# set root path in case if run from sub-url #}
+{% set script_root = '' if request.script_root == '/' else request.script_root %}
+<!DOCTYPE html>
+{#<html lang="en">#}
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="">
+    <meta name="author" content="Dmitry A. Duev">
+    <link rel="icon" type="image/png" href="{{-script_root-}}/static/robot-favicon.png">
+
+    <title>Robo-AO data archive</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-magnify.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/daterangepicker.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-submenu.min.css">
+
+    <!-- Font awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/animate.css">
+
+    <style>
+        html {
+            position: relative;
+            min-height: 100%;
+{#            -webkit-backface-visibility: hidden;#}
+        }
+        body {
+            padding-top: 70px;
+            /* Margin bottom by footer height */
+            margin-bottom: 60px;
+        }
+        .table-condensed>thead>tr>th, .table-condensed>tbody>tr>th,
+        .table-condensed>tfoot>tr>th, .table-condensed>thead>tr>td,
+        .table-condensed>tbody>tr>td, .table-condensed>tfoot>tr>td {
+            padding: 1px;
+            font-size: 9px;
+        }
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            /* Set the fixed height of the footer here */
+            height: 60px;
+            background-color: #f5f5f5;
+        }
+        .footer > .container {
+            padding-top: 20px;
+            padding-right: 15px;
+            padding-left: 15px;
+            text-align: center;
+        }
+        .main-container {
+            padding: 40px 15px;
+            text-align: center;
+        }
+        .carousel-fade .carousel-inner .item {
+            opacity: 0;
+            -webkit-transition: opacity 0.5s;
+            -moz-transition: opacity 0.5s;
+            -o-transition: opacity 0.5s;
+            transition: opacity 0.5s;
+        }
+        .carousel-control {
+            background-image: none !important; /* remove background gradients on controls */
+        }
+        .carousel-fade .carousel-inner .active {
+            opacity: 1;
+        }
+        .carousel-fade .carousel-inner .active.left,
+        .carousel-fade .carousel-inner .active.right {
+            left: 0;
+            opacity: 0;
+            z-index: 1;
+        }
+        .carousel-fade .carousel-inner .next.left,
+        .carousel-fade .carousel-inner .prev.right {
+            opacity: 1;
+        }
+        .carousel-fade .carousel-control {
+            z-index: 2;
+        }
+        @media all and (transform-3d), (-webkit-transform-3d) {
+            .carousel-fade .carousel-inner > .item.next,
+            .carousel-fade .carousel-inner > .item.active.right {
+                opacity: 0;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+            .carousel-fade .carousel-inner > .item.prev,
+            .carousel-fade .carousel-inner > .item.active.left {
+                opacity: 0;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+            .carousel-fade .carousel-inner > .item.next.left,
+            .carousel-fade .carousel-inner > .item.prev.right,
+            .carousel-fade .carousel-inner > .item.active {
+                opacity: 1;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+        }
+        .carouselButtons {
+            position: absolute;
+            top: 45%;
+            z-index: 5;
+{#            display: inline-block;#}
+            margin-top: -10px;
+            left: 42%;
+            right: auto;
+            text-align: center;
+            cursor: pointer;
+        }
+        .img-wrapper {
+            position: relative;
+            display:inline-block;
+        }
+        .overlay {
+            transition: opacity 0.3s;
+            opacity: 0;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+            {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+
+        .overlay-show {
+            transition: opacity 0.3s ease-out;
+            opacity: 0.7;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+            {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+
+        .back-to-top {
+            cursor: pointer;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display:none;
+        }
+        .img-flip {
+            -moz-transform: scaleY(-1);
+            -o-transform: scaleY(-1);
+            -webkit-transform: scaleY(-1);
+            transform: scaleY(-1);
+        }
+    </style>
+
+</head>
+
+{% block body %}{% endblock %}

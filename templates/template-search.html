@@ -1,0 +1,1745 @@
+{# set root path in case if run from sub-url #}
+{% set script_root = '' if request.script_root == '/' else request.script_root %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="">
+    <meta name="author" content="Dmitry A. Duev">
+    <link rel="icon" type="image/png" href="{{-script_root-}}/static/robot-favicon.png">
+
+    <title>Robo-AO data archive: search</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-magnify.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/daterangepicker.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-slider.min.css">
+    <!-- Font awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <!-- Bootstrap table -->
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.11.1/bootstrap-table.min.css">
+{#    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-table-fixed-columns.css">#}
+
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/animate.css">
+
+    <style>
+        html {
+            position: relative;
+            min-height: 100%;
+        }
+        body {
+            padding-top: 70px;
+            /* Margin bottom by footer height */
+            margin-bottom: 60px;
+        }
+        .form-group {
+            margin-bottom:5px !important;
+            margin-top: 2px !important;
+        }
+        th.rotate {
+            height: 70px;
+            white-space: nowrap;
+        }
+        th.rotate > div {
+            transform:
+                    translate(0px, -6px)
+                    rotate(315deg);
+            width: 20px;
+        }
+        th.rotate > div > span {
+            border-bottom: 1px solid #ddd;
+            padding: 5px 10px;
+        }
+{#        .th-inner {#}
+{#            white-space: normal;#}
+{#        }#}
+        td {
+            white-space: nowrap;
+{#            border-right: solid 1px #DDDDDD;#}
+        }
+        .borderless td, .borderless th {
+            border: none;
+        }
+        .table-condensed>thead>tr>th, .table-condensed>tbody>tr>th {
+            padding: 0;
+            font-size: 10px;
+        }
+        .table-condensed>tfoot>tr>th, .table-condensed>thead>tr>td,
+        .table-condensed>tbody>tr>td, .table-condensed>tfoot>tr>td {
+            padding: 1px;
+            font-size: 9px;
+        }
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            /* Set the fixed height of the footer here */
+            height: 60px;
+            background-color: #f5f5f5;
+        }
+        .footer > .container {
+            padding-top: 20px;
+            padding-right: 15px;
+            padding-left: 15px;
+            text-align: center;
+        }
+        .main-container {
+            padding: 40px 15px;
+            text-align: center;
+        }
+        .img-wrapper {
+            position: relative;
+            display:inline-block;
+        }
+        .overlay {
+            transition: opacity 0.3s;
+            opacity: 0;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+        {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+        .overlay-show {
+            transition: opacity 0.3s ease-out;
+            opacity: 0.7;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+        {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+        .back-to-top {
+            cursor: pointer;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display:none;
+        }
+        .table-fixed thead {
+            width: 100%;
+        }
+        .table-fixed tbody {
+            height: 100px;
+            overflow-y: auto;
+            width: 100%;
+        }
+{# fixed column for horizontal scroll #}
+{#        .table {#}
+{#            table-layout: fixed;#}
+{#        }#}
+{#        th {#}
+{#            width: 150px;#}
+{#        }#}
+    </style>
+
+</head>
+<body>
+
+<!-- Fixed navbar -->
+<nav class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed"
+                    data-toggle="collapse" data-target="#navbar"
+                    aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="{{-script_root-}}/">Robo-AO data archive</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+            <ul class="nav navbar-nav">
+                <li><a href="{{-script_root-}}/">Data</a></li>
+                <li class="active"><a href="{{-script_root-}}/search">Search</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown">
+                    <a href="#" class="dropdown-toggle" data-toggle="dropdown"
+                       role="button" aria-haspopup="true" aria-expanded="false">Logged in as
+                        <strong><span class="text-info">{{ user }}</span></strong> <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                        {# administration tasks #}
+                        {% if user == 'admin' %}
+                            <li><a href="{{-script_root-}}/manage_users">Manage users</a></li>
+                            <li><a href="{{-script_root-}}/manage_psflib">Manage PSF library</a></li>
+                            {# Manage reobserving requests #}
+                            {#<li><a href="manage_requests">Manage requests</a></li> #}
+                            <li class='disabled'><a href="#">Manage requests</a></li>
+                            {# View system logs #}
+                            {#<li><a href="view_logs">View logs</a></li>#}
+                            <li class='disabled'><a href="#">View logs</a></li>
+                        {% endif %}
+                        <li><a href="{{-script_root-}}/logout">Log out</a></li>
+                    </ul>
+                </li>
+
+            </ul>
+        </div><!--/.nav-collapse -->
+    </div>
+</nav>
+
+<div class="container">
+{#    {{ request.url }}<br>{{ request.script_root }}<br>{{ request.url_root }}#}
+    <div class="row">
+        <div class="col-md-12">
+            <h2>
+                Search the archive
+            </h2>
+
+            <div class="panel panel-default">
+                <div class="panel-heading panel-heading-sm">
+                    <h3 class="panel-title">Query</h3>
+                    <div class="pull-right" style="cursor:pointer;
+                            cursor:hand; margin-top:-15px;" id="query-box-dropdown"
+                         onClick="showHideQueryBox()" aria-label="query">
+                        <span class="glyphicon glyphicon-menu-up" aria-hidden="true"></span>
+                    </div>
+                </div>
+                <div class="panel-body" id="query-box" style="display: block">
+                    <form class="form-horizontal " action="{{-script_root-}}/search" method="POST">
+                        <div class="form-group">
+                            <label for="source_name" class="col-md-2 control-label">Source name</label>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control" id="source_name" name="source_name"
+                                       placeholder="default: get all if blank">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="checkbox-inline">
+                                    <input type="checkbox" id="source_name_exact"
+                                           name="source_name_exact" checked="checked"> Exact match
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ra" class="col-md-2 control-label">RA</label>
+                            <div class="col-md-2">
+                                <input type="text" class="form-control radec" id="ra" name="ra"
+                                       placeholder="get all if blank" data-toggle="tooltip" data-placement="top"
+                                       title="H:M:S or HhMmSs or rad">
+                            </div>
+
+                            <label for="dec" class="col-md-1 control-label">Dec</label>
+                            <div class="col-md-2">
+                                <input type="text" class="form-control radec" id="dec" name="dec"
+                                       placeholder="get all if blank" data-toggle="tooltip" data-placement="top"
+                                       title="D:M:S or DdMmSs or rad">
+                            </div>
+
+                            <label for="cone_search_radius" class="col-md-2 control-label">
+                                Cone search radius
+                            </label>
+                            <div class="col-md-3">
+                                <div class="row">
+                                    <div class="col-xs-4">
+                                        <input type="text" class="form-control" id="cone_search_radius"
+                                               name="cone_search_radius" placeholder="">
+                                    </div>
+                                    <div class="col-xs-8">
+                                        <select class="form-control" id="cone_search_unit"
+                                                name="cone_search_unit">
+                                            <option>arcsec</option>
+                                            <option>arcmin</option>
+                                            <option>deg</option>
+                                            <option>rad</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="program_id" class="col-md-2 control-label">Program ID</label>
+                            <div class="col-md-2">
+                                <select class="form-control" id="program_id" name="program_id">
+                                    <option>all</option>
+                                    {% for program_id in program_ids|sort %}
+                                        <option>{{ program_id }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <label for="program_id" class="col-md-2 control-label">Time range, UTC</label>
+                            <div class="col-md-6">
+                                <div class="input-group">
+                                    <input type="text" name="daterange" id="daterange" class="form-control"
+                                       style="cursor: pointer"/>
+                                    <span class="input-group-addon" style="cursor: pointer" onclick="$('#daterange').click();">
+                                        <span class="glyphicon glyphicon-calendar"></span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {# advanced search options #}
+                        <div class="form-group">
+                            <div class="col-md-offset-2 col-md-10">
+                                <button type="button" class="btn btn-info"
+                                        data-toggle="collapse" data-target="#filter-panel"
+                                        id="advanced_search" style="margin-top:10px; margin-bottom:10px;">
+                                    <span class="glyphicon glyphicon-cog"></span> Advanced search options
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="filter-panel" class="collapse filter-panel">
+                            <div class="form-group">
+                                <label for="source_id" class="col-md-2 control-label">Source ID</label>
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="source_id" name="source_id"
+                                           placeholder="get all if blank">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="source_id_exact"
+                                               name="source_id_exact" checked="checked"> Exact match
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="filter" class="col-md-2 control-label">Filter</label>
+                                <div class="col-md-4">
+                                    <select class="form-control" id="filter" name="filter">
+                                        <option>any</option>
+                                        <option>Sloan g</option>
+                                        <option>Sloan r</option>
+                                        <option>Sloan i</option>
+                                        <option>Sloan z</option>
+                                        <option>Longpass 600nm</option>
+                                        <option>Clear</option>
+{#                                        <option>H</option>#}
+                                        <option>J</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="seeing_median" class="control-label" style="width: 200px;">
+                                            Median seeing, "&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="seeing_median" name="seeing_median" type="text"
+                                           data-provide="slider" data-slider-min="0.1" data-slider-max="3"
+                                           data-slider-step="0.1" data-slider-value="[0.1,3]" data-slider-range="true"
+                                           data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="seeing_nearest" class="control-label" style="width: 200px;">
+                                            Nearest seeing, "&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="seeing_nearest" name="seeing_nearest" type="text"
+                                           data-provide="slider" data-slider-min="0.1" data-slider-max="3"
+                                           data-slider-step="0.1" data-slider-value="[0.1,3]" data-slider-range="true"
+                                           data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="exposure" class="control-label" style="width: 200px;">
+                                            Exposure, s&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="exposure" name="exposure" type="text"
+                                               data-provide="slider" data-slider-min="0" data-slider-max="600"
+                                               data-slider-step="1" data-slider-value="[0,600]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="magnitude" class="control-label" style="width: 200px;">
+                                            Magnitude&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="magnitude" name="magnitude" type="text"
+                                               data-provide="slider" data-slider-min="-6" data-slider-max="23"
+                                               data-slider-step="0.1" data-slider-value="[-6,23]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="azimuth" class="control-label" style="width: 200px;">
+                                            Azimuth, &deg;&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="azimuth" name="azimuth" type="text"
+                                               data-provide="slider" data-slider-min="0" data-slider-max="360"
+                                               data-slider-step="1" data-slider-value="[0,360]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="elevation" class="control-label" style="width: 200px;">
+                                            Elevation, &deg;&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="elevation" name="elevation" type="text"
+                                               data-provide="slider" data-slider-min="0" data-slider-max="90"
+                                               data-slider-step="1" data-slider-value="[0,90]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="lucky_strehl" class="control-label" style="width: 200px;">
+                                            Lucky Strehl, %&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="lucky_strehl" name="lucky_strehl" type="text"
+                                               data-provide="slider" data-slider-min="0" data-slider-max="100"
+                                               data-slider-step="1" data-slider-value="[0,100]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <p>
+                                        <label for="faint_strehl" class="control-label" style="width: 200px;">
+                                            Faint Strehl, %&nbsp;&nbsp;&nbsp;
+                                        </label>
+                                        <input id="faint_strehl" name="faint_strehl" type="text"
+                                               data-provide="slider" data-slider-min="0" data-slider-max="100"
+                                               data-slider-step="1" data-slider-value="[0,100]" data-slider-range="true"
+                                               data-slider-tooltip="show"/>
+                                    </p>
+                                </div>
+
+                                <label for="lucky_strehl_label" class="col-md-2 control-label">Lucky Strehl label</label>
+                                <div class="col-md-4">
+                                    <select class="col-md-2 form-control" id="lucky_strehl_label"
+                                            name="lucky_strehl_label">
+                                        <option>any</option>
+                                        <option>OK</option>
+                                        <option>BAD?</option>
+                                    </select>
+                                </div>
+
+                                <label for="faint_strehl_label" class="col-md-2 control-label">Faint Strehl label</label>
+                                <div class="col-md-4">
+                                    <select class="col-md-2 form-control" id="faint_strehl_label"
+                                            name="faint_strehl_label">
+                                        <option>any</option>
+                                        <option>OK</option>
+                                        <option>BAD?</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="pipelines" class="col-md-2 control-label">Pipelines</label>
+                                <div class="col-md-10">
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="pipe_lucky"
+                                               name="pipe_lucky" data-toggle="tooltip" data-placement="top"
+                                               title="strictly done if checked"> Lucky
+                                    </label>
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="pipe_lucky_pca"
+                                               name="pipe_lucky_pca" data-toggle="tooltip" data-placement="top"
+                                               title="strictly done if checked"> PCA for lucky
+                                    </label>
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="pipe_faint"
+                                               name="pipe_faint" data-toggle="tooltip" data-placement="top"
+                                               title="strictly done if checked"> Faint
+                                    </label>
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="pipe_faint_pca"
+                                               name="pipe_faint_pca" data-toggle="tooltip" data-placement="top"
+                                               title="strictly done if checked"> PCA for faint
+                                    </label>
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" id="pipe_planetary"
+                                               name="pipe_planetary" data-toggle="tooltip" data-placement="top"
+                                               title="strictly done if checked"> Planetary
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        {# output formatting #}
+                        <div class="form-group">
+                            <label for="output_formatting" class="col-md-2 control-label">Output formatting</label>
+                            <div class="col-md-10" id="output_formatting">
+                                <label class="checkbox-inline">
+                                    <input type="checkbox" id="output_table"
+                                           name="output_table" checked="checked"> table
+                                </label>
+                                <label class="checkbox-inline">
+                                    <input type="checkbox" id="output_thumbnail"
+                                            name="output_thumbnail"> thumbnail gallery
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="col-md-offset-2 col-md-10">
+                                <button type="submit" class="btn btn-success">Search</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# query results #}
+<div class="container">
+    <div class="row">
+        {% if obs | length > 0 and (form['output_table'] == 'on' or form['output_thumbnail'] == 'on') %}
+            <div class="col-md-12">
+                <div class="data-tabs">
+
+                    <!-- Nav tabs -->
+                    <ul class="nav nav-tabs" role="tablist" id="nav-tabs">
+                        {% if form['output_table'] == 'on' %}
+                            <li role="presentation" id="nav-tabs-table">
+                                <a href="#data-table" aria-controls="data-table"
+                                   role="tab" data-toggle="tab">Summary table</a>
+                            </li>
+                        {% endif %}
+                        {% if form['output_thumbnail'] == 'on' %}
+                            <li role="presentation" id="nav-tabs-thumbnail">
+                                <a href="#data-thumbnail" aria-controls="data-thumbnail"
+                                   role="tab" data-toggle="tab">Thumbnails</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+
+                    <!-- Tab panes -->
+                    <div class="tab-content">
+                        {% if form['output_table'] == 'on' %}
+                            <div role="tabpanel" class="tab-pane" id="data-table">
+
+                                <div id="toolbar">
+                                    <div data-toggle="tooltip" data-placement="top"
+                                         title="Dont't forget to 'chmod u+x'">
+                                        Master wget-script to fetch all available data:
+                                        <a href="#" id="fetch-all" onclick="fetch_all()">
+                                            wget.sh
+                                        </a>
+                                    </div>
+                                </div>
+                                <table id="table"
+                                       class="table table-hover table-condensed"
+                                       data-toggle="table"
+                                       data-toolbar="#toolbar"
+                                       data-pagination="true"
+                                       data-side-pagination="client"
+                                       data-minimum-count-columns="2"
+                                       data-page-size="20"
+                                       data-page-list="[20, 50, 100, 200, 500, All]"
+                                       data-search="true"
+                                       data-show-columns="true"
+                                       data-show-export="true"
+                                       data-export-types="['json', 'csv']"
+                                       data-export-options='{
+                                             "fileName": "table",
+                                             "worksheetName": "table1",
+                                           }'
+{#                                       data-fixed-columns="true"#}
+{#                                       data-fixed-number="3"#}
+                                >
+                                    <thead>
+                                    <tr>
+{#                                        <th data-field="state" data-checkbox="true"></th>#}
+                                        <th data-sortable="true"><div data-toggle="tooltip" data-placement="top"
+                                                 title="Program ID">pID</div>
+                                        </th>
+                                        <th data-sortable="true">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Source name">Name</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">date_UTC</th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="h:m:s">RA</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="d:m:s">Dec</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="numberSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Azimuth, degrees">Az, &deg;</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="numberSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Elevation, degrees">El, &deg;</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="numberSorter">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Magnitude">mag</div>
+                                            </th>
+                                        <th data-sortable="true" data-sorter="numberSorter">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Exposure, seconds">exp, s</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Filter name">filter</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="numberSorter">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Median seeing on the night">M_seeing, "</div></th>
+                                        <th data-sortable="true" data-sorter="numberSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Nearest seeing measurement">N_seeing, "</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Bright source Pipeline done?">BP</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="PCA for bright source pipeline done?">BP_PCA</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="numberSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Strehl ration for BP">BP_Strehl</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="BP Strehl marked OK?">BP_S_OK</div>
+                                        </th>
+                                        <th data-sortable="true" data-sorter="stringSorter">
+                                            <div data-toggle="tooltip" data-placement="top"
+                                                 title="Faint source pipeline done?">FP</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="PCA for faint source pipeline done?">FP_PCA</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="numberSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Strehl ratio for FP">FP_Strehl</div>
+                                        </th>
+                                        <th data-sortable="true" data-visible="false" data-sorter="stringSorter">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="FP Strehl marked OK?">FP_S_OK</div>
+                                        </th>
+                                        <th data-sortable="true">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Download">
+                                                <span class="glyphicon glyphicon-circle-arrow-down"></span>
+                                            </div>
+                                        </th>
+                                        <th data-sortable="true">
+                                            <div style="max-width: 30px;" data-toggle="tooltip" data-placement="top"
+                                                 title="Preview">
+                                                <span class="glyphicon glyphicon-play"></span>
+                                            </div>
+                                        </th>
+{#                                        {% for key in ('program_id', 'name', 'date_UTC', 'RA, h:m:s', 'Dec, d:m:s',#}
+{#                                                       'Az, deg', 'El, deg', 'mag', 'exposure, s', 'filter',#}
+{#                                                       'median seeing, "', 'nearest seeing, "',#}
+{#                                                       'lucky_done', 'lucky_pca_done', 'lucky_strehl',#}
+{#                                                       'faint_done', 'faint_pca_done', 'faint_strehl',#}
+{#                                                       'download_link', 'preview')%}#}
+{#                                            <th data-sortable="true">{{ key }}</th>#}
+{#                                        {% endfor %}#}
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {% for object in obs %}
+                                        <tr class="clickable-row">
+{#                                            <td></td>#}
+                                            <td>
+                                                {{ object['science_program']['program_id'] }}
+                                            </td>
+                                            {% for key in ('name', 'date_utc')%}
+                                                <td id="{{ key }}">
+                                                    {{ object[key] }}
+                                                </td>
+                                            {% endfor %}
+                                            <td>
+                                                {% if object['coordinates']['azel'] != None %}
+                                                    {{ object['coordinates']['radec_str'][0] }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if object['coordinates']['azel'] != None %}
+                                                    {{ object['coordinates']['radec_str'][1] }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if object['coordinates']['azel'] != None %}
+                                                    {{ '%.2f' | format(object['coordinates']['azel'][0]*180.0/3.1415926) }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if object['coordinates']['azel'] != None %}
+                                                    {{ '%.2f' | format(object['coordinates']['azel'][1]*180.0/3.1415926) }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            {% for key in ('magnitude', 'exposure', 'filter')%}
+                                                <td>
+                                                    {% if object[key] != None %}
+                                                        {{ object[key] }}
+                                                    {% else %}
+                                                        <span class="label label-default">None</span>
+                                                    {% endif %}
+                                                </td>
+                                            {% endfor %}
+                                            <td>
+                                                {% if object['seeing']['median'] != None %}
+                                                    {{ '%.2f' | format(object['seeing']['median']) }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if ('seeing' in object) and ('nearest' in object['seeing']) and
+                                                    (object['seeing']['nearest'] != None) %}
+                                                    {{ '%.2f' | format(object['seeing']['nearest'][1]) }}
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            {% for key in ('automated', 'faint')%}
+                                                {# set up classes for color-coding the badges #}
+                                                {% set class_pipe = 'success' if
+                                                object['pipelined'][key]['status']['done'] else 'danger' %}
+                                                {# being recomputed? #}
+                                                {% if key == 'faint' and (object['pipelined'][key]['status']['force_redo']
+                                                or object['pipelined'][key]['status']['enqueued']) %}
+                                                    {% set class_pipe = 'warning' %}
+                                                {% endif %}
+                                                {% set class_pipe_pca = 'success' if
+                                                object['pipelined'][key]['pca']['status']['done'] else 'danger' %}
+                                                {# being recomputed? #}
+                                                {% if object['pipelined'][key]['pca']['status']['force_redo']
+                                                or object['pipelined'][key]['pca']['status']['enqueued'] %}
+                                                    {% set class_pipe_pca = 'warning' %}
+                                                {% endif %}
+
+                                                {# pipelined? #}
+                                                <td>
+                                                    {# jedi master can use force to force redo! #}
+                                                    {% if user == 'admin' and key == 'faint' %}
+                                                        <span style="cursor: pointer;"
+                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}');">
+                                                    {% endif %}
+                                                    <span class="label label-{{ class_pipe }}" id="{{ object['_id'] }}_{{ key }}">
+                                                        {{ object['pipelined'][key]['status']['done'] }}
+                                                    </span>
+                                                    {% if user == 'admin' %}
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                {# pca pipeline done? #}
+                                                <td>
+                                                    {# jedi master can use force to force redo! #}
+                                                    {% if user == 'admin' %}
+                                                        <span style="cursor: pointer;"
+                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.pca');">
+                                                    {% endif %}
+                                                    <span class="label label-{{ class_pipe_pca }}" id="{{ object['_id'] }}_{{ key }}.pca">
+                                                        {{ object['pipelined'][key]['pca']['status']['done'] }}
+                                                    </span>
+                                                    {% if user == 'admin' %}
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                {# Strehl computed? #}
+                                                <td>
+                                                    {# jedi master can use force to force redo! #}
+                                                    {% if user == 'admin' %}
+                                                        <span style="cursor: pointer;"
+                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.strehl');">
+                                                    {% endif %}
+                                                    {% if object['pipelined'][key]['strehl']['ratio_percent'] != None %}
+                                                        {# being recomputed? #}
+                                                        {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
+                                                            </span>
+                                                        {% else %}
+                                                            <span  id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
+                                                            </span>
+                                                        {% endif %}
+                                                    {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                        <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                            None
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                            None
+                                                        </span>
+                                                    {% endif %}
+                                                    {% if user == 'admin' %}
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                {# Strehl labled? #}
+                                                <td>
+                                                    {% if object['pipelined'][key]['strehl']['flag'] != None %}
+                                                        {# being recomputed? #}
+                                                        {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                            </span>
+                                                        {% else %}
+                                                            {% if object['pipelined'][key]['strehl']['flag'] == 'OK' %}
+                                                                <span class="label label-success" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                    {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                            {% elif object['pipelined'][key]['strehl']['flag'] == 'BAD?' %}
+                                                                <span class="label label-danger" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                    {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                            {% endif %}
+                                                                </span>
+                                                        {% endif %}
+                                                    {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                        <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                            None
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                            None
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                            {% endfor %}
+                                            {# obs distributed? #}
+                                            <td>
+                                                {% if object['distributed']['status'] %}
+                                                    <a href="{{-script_root-}}/data/{{object['date_utc'].strftime('%Y%m%d')}}/{{object['_id']}}/{{object['_id']}}.tar.bz2">
+                                                        <span class="glyphicon glyphicon-download" style="font-size: 11px"></span></a>
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                            {# display modal with preview stuff #}
+                                            <td>
+                                                {% if object['pipelined']['automated']['status']['done'] or
+                                                        object['pipelined']['faint']['status']['done'] %}
+                                                    <a href="#" data-toggle="modal" data-target="#sourceModal"
+                                                       data-date="{{object['date_utc'].strftime('%Y%m%d')}}"
+                                                       data-source="{{ object['_id'] }}"
+                                                       data-sou_name="{{ object['name'] }}"
+                                                       data-lucky="{{ object['pipelined']['automated']['preview']['done'] }}"
+                                                       data-lucky-strehl="{{ object['pipelined']['automated']['strehl']['status']['done'] }}"
+                                                       data-lucky-pca="{{ object['pipelined']['automated']['pca']['preview']['done'] }}"
+                                                       data-faint="{{ object['pipelined']['faint']['preview']['done'] }}"
+                                                       data-faint-strehl="{{ object['pipelined']['faint']['strehl']['status']['done'] }}"
+                                                       data-faint-pca="{{ object['pipelined']['faint']['pca']['preview']['done'] }}">
+                                                    <span class="glyphicon glyphicon-play-circle" style="font-size: 11px"></span></a>
+                                                {% else %}
+                                                    <span class="label label-default">None</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                        {% if form['output_thumbnail'] == 'on' %}
+                            <div role="tabpanel" class="tab-pane" id="data-thumbnail">
+                                {# toggle summary info #}
+                                <button type="button" class="btn btn-default btn-sm"
+                                        style="margin-top:10px;" onClick="toggle_summary()">
+                                    Toggle summary
+                                </button><br>
+
+                                {# change preview size #}
+                                <div style="margin-top: 10px;">
+                                    <span style="margin-right: 10px;">Thumbnail size:</span>
+                                    <input id="preview_size" type="text" data-slider-min="50" data-slider-max="400"
+                                       data-slider-step="1" data-slider-value="120"/>
+                                    <span style="margin-left: 10px;"><span id="preview_size_val">120</span>&nbsp;px</span>
+                                </div>
+
+                                {# previews in the flesh #}
+                                <div id="preview_images" style="margin-top: 10px;">
+                                    {% for object in obs %}
+                                        {% if (object['pipelined']['automated']['status']['done'] and
+                                                object['pipelined']['automated']['classified_as'] != 'failed') or
+                                                object['pipelined']['faint']['status']['done'] %}
+                                            {% set date = object['date_utc'].strftime('%Y%m%d') %}
+                                            <div class="img-wrapper">
+                                                {% if object['pipelined']['automated']['status']['done'] %}
+                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/automated/preview/{{object['_id']}}_cropped.png"
+                                                         alt="{{ object['_id'] }}"
+                                                         style="height:120px; cursor: pointer; margin-bottom: 3px;"
+                                                         class="preview">
+                                                {% elif object['pipelined']['faint']['status']['done'] %}
+                                                    <img src="{{-script_root-}}/data/{{date}}/{{object['_id']}}/faint/preview/{{object['_id']}}_cropped.png"
+                                                         alt="{{ object['_id'] }}"
+                                                         style="height:120px; cursor: pointer;"
+                                                         class="preview">
+                                                {% endif %}
+                                                <div class="overlay" data-toggle="modal" data-target="#sourceModal"
+                                                     data-date="{{date}}"
+                                                     data-source="{{ object['_id'] }}"
+                                                     data-sou_name="{{ object['name'] }}"
+                                                     data-lucky="{{ object['pipelined']['automated']['preview']['done'] }}"
+                                                     data-lucky-strehl="{{ object['pipelined']['automated']['strehl']['status']['done'] }}"
+                                                     data-lucky-pca="{{ object['pipelined']['automated']['pca']['preview']['done'] }}"
+                                                     data-faint="{{ object['pipelined']['faint']['preview']['done'] }}"
+                                                     data-faint-strehl="{{ object['pipelined']['faint']['strehl']['status']['done'] }}"
+                                                     data-faint-pca="{{ object['pipelined']['faint']['pca']['preview']['done'] }}"
+                                                     style="cursor: pointer;">
+                                                     {{object['name']}}<br>
+                                                     Camera: {{object['camera']}}<br>
+                                                     Filter: {{object['filter']}}
+                                                    <br>{{object['date_utc']}}
+                                                </div>
+                                            </div>
+                                        {% endif %}
+                                    {% endfor %}
+                                    <br>
+                                    <p style="margin-top: 10px;">
+                                    {% for object in obs %}
+                                        {% if object['pipelined']['automated']['status']['done'] and
+                                                object['pipelined']['automated']['classified_as'] == 'failed' %}
+                                            {{ object['_id'] }}: failed<br>
+                                        {% endif %}
+                                    {% endfor %}
+                                    </p>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+
+<br>
+
+<footer class="footer">
+    <div class="container">
+        <p class="text-muted" id="years">&copy; Robo-AO 2016-{{ current_year }}</p>
+    </div>
+</footer>
+
+
+<!-- Modal template to display aux images -->
+<div class="modal fade" id="aux_image_modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal">
+                    <span aria-hidden="true">&times;</span><span class="sr-only">Close</span>
+                </button>
+                <h4 class="modal-title"></h4>
+            </div>
+            <div class="modal-body">
+                <img src="" id="aux_image_preview" style="width: 100%;" >
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Modal template to display preview images -->
+<div class="modal fade" id="sourceModal" tabindex="-1" role="dialog" aria-labelledby="ModalLabel">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"
+                        aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" id="ModalLabel">Object name</h4>
+            </div>
+            <div class="modal-body">
+                <div style="display:none;" id="modalSourceName"></div>
+                <div id="sourceTabs">
+                    <!-- Nav tabs -->
+                    <ul class="nav nav-tabs" role="tablist">
+                        <li role="presentation" class="active">
+                            <a href="#luckyImagesTab" aria-controls="luckyImagesTab"
+                               role="tab" data-toggle="tab">Lucky pipeline</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#faintImagesTab" aria-controls="faintImagesTab"
+                               role="tab" data-toggle="tab">Faint pipeline</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#headerTab" aria-controls="headerTab"
+                               role="tab" data-toggle="tab">Header</a>
+                        </li>
+                        <li role="presentation">
+                            <a href="#externalImagesTab" aria-controls="externalImagesTab"
+                               role="tab" data-toggle="tab">External images of the field</a>
+                        </li>
+                    </ul>
+
+                    <!-- Tab panes -->
+                    <div class="tab-content">
+                        <!--Lucky data-->
+                        <div role="tabpanel" class="tab-pane active" id="luckyImagesTab">
+                            <div class="row" id="luckyImagesTabContent" style="display:none;">
+                                <div class="col-md-6">
+                                    <h5>Full-size</h5>
+                                    <img id="lucky_sou_full" src="" style="width: 100%;" data-toggle="magnify">
+                                    <br><br>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="col-xs-6">
+                                        <h5 id="lucky_sou_cropped_label">Cropped</h5>
+                                        <img id="lucky_sou_cropped" src="" style="width:100%;" data-toggle="magnify">
+                                    </div>
+                                    <div class="col-xs-6">
+                                        <h5 id="lucky_sou_pca_label" style="display:none;">PSF-subtracted</h5>
+                                        <img id="lucky_sou_pca" src="" style="display:none; width:100%;"
+                                             data-toggle="magnify">
+                                    </div>
+                                    <img id="lucky_sou_cc" src="" style="display:none; width:100%;">
+                                </div>
+                            </div>
+                            <div class="row" id="luckyImagesTabEmpty" style="display: none">
+                                <div class="col-md-12">
+                                    <h4>No data to show</h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--Faint data-->
+                        <div role="tabpanel" class="tab-pane" id="faintImagesTab">
+                            <div class="row" id="faintImagesTabContent" style="display:none;">
+                                <div class="col-md-6">
+                                    <h5>Full-size</h5>
+                                    <img id="faint_sou_full" src="" style="width: 100%;" data-toggle="magnify">
+                                    <br><br>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="col-xs-6">
+                                        <h5 id="faint_sou_cropped_label">Cropped</h5>
+                                        <img id="faint_sou_cropped" src="" style="width:100%;" data-toggle="magnify">
+                                    </div>
+                                    <div class="col-xs-6">
+                                        <h5 id="faint_sou_pca_label" style="display:none;">PSF-subtracted</h5>
+                                        <img id="faint_sou_pca" src="" style="display:none; width:100%;"
+                                             data-toggle="magnify">
+                                    </div>
+                                    <img id="faint_sou_cc" src="" style="display:none; width:100%;">
+                                </div>
+                            </div>
+                            <div class="row" id="faintImagesTabEmpty" style="display: none">
+                                <div class="col-md-12">
+                                    <h4>No data to show</h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--FITS header-->
+                        <div role="tabpanel" class="tab-pane" id="headerTab">
+                            <div class="row">
+                                <div class="col-md-12" id="headerTabLoading">
+                                    <p style="margin-top:10px;">
+                                        Loading...&nbsp;<i class="fa fa-gear fa-spin" style="font-size:24px"></i>
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <h5>FITS header</h5>
+                                    <table class="table table-striped table-hover table-condensed"
+                                           id="headerTable">
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--External images-->
+                        <div role="tabpanel" class="tab-pane" id="externalImagesTab">
+                            <div class="row">
+                                <div class="col-md-12" id="externalImagesTabLoading">
+                                    <p style="margin-top:10px;">
+                                        Loading...&nbsp;<i class="fa fa-gear fa-spin" style="font-size:24px"></i>
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6" id="dss2_r" style="display: none">
+                                    <h5>DSS2 (r filter) [1'x1']:</h5>
+                                    <img id="dss2_r_image" src="" style="width:100%;" data-toggle="magnify">
+                                </div>
+                                <div class="col-md-6" id="2mass_h" style="display: none">
+                                    <h5>2MASS (H filter) [1'x1']:</h5>
+                                    <img id="2mass_h_image" src="" style="width:100%;" data-toggle="magnify">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+
+
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="previewModalDonloadLink" style="float: left">Download all source data</a>
+                <button type="button" class="btn btn-success" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scroll to top -->
+<a id="back-to-top" href="#" class="btn btn-primary btn-md back-to-top"
+   role="button" title="Click to return on the top page"
+   data-toggle="tooltip" data-placement="left">
+    <span class="glyphicon glyphicon-chevron-up"></span>
+</a>
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-magnify.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-notify.js"></script>
+<script src="{{-script_root-}}/static/js/moment.min.js"></script>
+<script src="{{-script_root-}}/static/js/daterangepicker.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-slider.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootbox.js"></script>
+<!-- Bootstrap table -->
+<!-- Latest compiled and minified JavaScript -->
+<script src="//cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.11.1/bootstrap-table.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.11.1/locale/bootstrap-table-en-US.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-table-export.js"></script>
+<script src="{{-script_root-}}/static/js/tableExport.js"></script>
+<script src="{{-script_root-}}/static/js/FileSaver.min.js"></script>
+{#<script src="{{-script_root-}}/static/js/bootstrap-table-fixed-columns.js"></script>#}
+
+<script>
+    // Fancy table stuff
+    function getHeight() {
+        var window_height = $(window).height();
+        if (window_height > 1200) {
+            var top = document.getElementById('table').getBoundingClientRect().top;
+            return Math.max(400, window_height - top - 30);
+        }
+        else {
+            return Math.max(400, window_height - 200);
+        }
+    }
+    // reset height of table with search results
+    function resetTableHeight() {
+        var $table = $('#table');
+        $table.bootstrapTable('resetView', {
+            height: getHeight()
+        });
+    }
+    $(document).ready(function() {
+        // on load
+        if( $('#table').length ) {
+            resetTableHeight();
+        }
+    });
+    $(window).resize(function () {
+        // on window resize
+        if( $('#table').length ) {
+            resetTableHeight();
+        }
+    });
+
+    // sorting:
+    var $table = $('#table');
+
+    function getOrder() {
+        return $table.bootstrapTable('getOptions').sortOrder === 'asc' ? -1 : 1;
+    }
+
+    function numberSorter(a, b) {
+        a = $.trim(a.replace(/<\/?[^>]+(>|$)/g, ""));
+        b = $.trim(b.replace(/<\/?[^>]+(>|$)/g, ""));
+        if (!a || a === 'None') return -1 * getOrder();
+        if (!b || b === 'None') return 1 * getOrder();
+        if (parseFloat(a) < parseFloat(b)) return -1;
+        if (parseFloat(a) > parseFloat(b)) return 1;
+        return 0;
+    }
+
+    function stringSorter(a, b) {
+        a = $.trim(a.replace(/<\/?[^>]+(>|$)/g, ""));
+        b = $.trim(b.replace(/<\/?[^>]+(>|$)/g, ""));
+        if (!a || a === 'None') return -1 * getOrder();
+        if (!b || b === 'None') return 1 * getOrder();
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
+    }
+</script>
+
+{#<script>#}
+{#    $(document).ready(function(){#}
+{#        $(function () {#}
+{#            var $table = $('#table');#}
+{#            $('#toolbar').find('select').change(function () {#}
+{#            $table.bootstrapTable('refreshOptions', {#}
+{#              exportDataType: $(this).val()#}
+{#            });#}
+{#          });#}
+{#        });#}
+{#    });#}
+{#</script>#}
+
+<script>
+$(document).ready(function(){
+    $(window).scroll(function () {
+        if ($(this).scrollTop() > 50) {
+            $('#back-to-top').fadeIn();
+        }
+        else {
+            $('#back-to-top').fadeOut();
+        }
+    });
+    // scroll body to 0px on click
+    $('#back-to-top').click(function () {
+        $('#back-to-top').tooltip('hide');
+        $('body,html').animate({
+            scrollTop: 0
+        }, 300);
+        return false;
+    });
+
+    $('#back-to-top').tooltip('show');
+
+});
+</script>
+
+<script>
+    // for AJAX requests [absolute website's uri]:
+    $SCRIPT_ROOT = {{ script_root|tojson|safe }};
+{#    console.log($SCRIPT_ROOT);#}
+
+    // switch tabs
+    $(document).ready(function() {
+        // activate switch
+        $('.data-tabs li a').click(function (e) {
+            e.preventDefault();
+            $(this).tab('show')
+        });
+        // select active tab
+        {% if form['output_table'] == 'on' %}
+            $('#nav-tabs-table').addClass('active');
+            $('#data-table').addClass('active');
+        {% else %}
+            $('#nav-tabs-thumbnail').addClass('active');
+            $('#data-thumbnail').addClass('active');
+        {% endif %}
+    });
+
+    // toggle summary info
+    function toggle_summary(date) {
+        $('div[data-toggle="modal"]').each(function() {
+            $(this).toggleClass('overlay overlay-show');
+        });
+    }
+
+    // display
+    $(document).ready(function() {
+        $(".img-wrapper").hover(
+            function () {
+                $(this).find('div[data-toggle="modal"]').toggleClass('overlay overlay-show');
+            }
+        )
+    });
+
+    // Change preview sizes with JQuery
+    $(document).ready(function() {
+        $("#preview_size").slider();
+        $("#preview_size").on("change", function (slideEvt) {
+            $("#preview_size_val").text(slideEvt.value.newValue);
+            // change preview sizes
+            $(".preview").css('height', slideEvt.value.newValue);
+        });
+    });
+
+</script>
+
+{# fetch-all #}
+<script>
+    function fetch_all() {
+        // Data to post
+        var data = {
+            ids: [{% for object in obs %}'{{ object['_id'] }}',{% endfor %}]
+        };
+
+        // Use XMLHttpRequest instead of Jquery $ajax
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function() {
+            var a;
+            if (xhttp.readyState === 4 && xhttp.status === 200) {
+                // Trick for making downloadable link
+                a = document.createElement('a');
+                a.href = window.URL.createObjectURL(xhttp.response);
+                // Give filename you wish to download
+                a.download = "wget.sh";
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+            }
+        };
+        // Post data to URL which handles post request
+        xhttp.open("POST", $SCRIPT_ROOT + 'get_data_by_id');
+        xhttp.setRequestHeader("Content-Type", "application/json");
+        // You should set responseType as blob for binary responses
+        xhttp.responseType = 'blob';
+        xhttp.send(JSON.stringify(data));
+    }
+</script>
+
+{# init tooltips #}
+<script>
+    $(function () {
+        $('[data-toggle="tooltip"]').tooltip()
+    })
+</script>
+
+{# current year for solidnost' #}
+{#<script>#}
+{#    $(document).ready(function() {#}
+{#        var ynow = moment().format('YYYY');#}
+{#        $('#years').append('-'+ynow);#}
+{#    });#}
+{#</script>#}
+
+{# output formatting - at least one checkbox must be checked #}
+<script>
+    $(':checkbox').change(function() {
+        if ($('#output_table').prop('checked')!= true && $('#output_thumbnail').prop('checked')!= true) {
+            $('#output_table').prop('checked', true);
+        }
+    });
+</script>
+
+{# toggle cone search #}
+{#<script>#}
+{#    $('.radec').change(function() {#}
+{#        $("#cone_search_radius").prop('disabled', false);#}
+{#        $("#cone_search_unit").prop('disabled', false);#}
+{#    });#}
+{#</script>#}
+
+{# daterangepicker #}
+<script type="text/javascript">
+$(function() {
+
+    var start = moment().utc().subtract(9, 'days').startOf('day');
+    var end = moment().utc();
+
+    function cb(start, end) {
+        $('#daterange').val(start.format('YYYY/MM/DD HH:mm') + ' - ' + end.format('YYYY/MM/DD HH:mm'));
+    }
+
+    $('#daterange').daterangepicker({
+        startDate: start,
+        endDate: end,
+        timePicker: true,
+        timePicker24Hour: true,
+        timePickerIncrement: 5,
+        locale: {
+            format: 'YYYY/MM/DD HH:mm'
+        },
+        ranges: {
+           'Today': [moment().utc().startOf('day'), moment().utc().add(1, 'days').startOf('day')],
+           'Yesterday': [moment().utc().subtract(1, 'days').startOf('day'),
+                         moment().utc().startOf('day')],
+           'Last 7 Days': [moment().utc().subtract(6, 'days').startOf('day'),
+                           moment().utc().add(1, 'days').startOf('day')],
+           'Last 30 Days': [moment().utc().subtract(29, 'days').startOf('day'),
+                            moment().utc().add(1, 'days').startOf('day')],
+           'This Month': [moment().utc().startOf('month'),
+                          moment().utc().endOf('month')],
+           'Last Month': [moment().utc().subtract(1, 'month').startOf('month'),
+                          moment().utc().subtract(1, 'month').endOf('month')],
+           'Everything': ["2015/10/01 00:00", moment().utc()]
+        },
+        minDate: "2015/10/01 00:00",
+        maxDate: "2020/01/01 00:00",
+        opens: "center"
+    }, cb);
+
+    cb(start, end);
+
+});
+</script>
+
+<script>
+    // relayout sliders on show to center tooltip
+    function update_sliders() {
+        {%-for key in ('magnitude', 'exposure', 'azimuth', 'elevation',
+                            'seeing', 'lucky_strehl', 'faint_strehl')-%}
+            $("#{{ key }}").slider('relayout');
+        {%-endfor-%}
+    }
+
+    $('.filter-panel').on('shown.bs.collapse', function (e) {
+        update_sliders();
+        e.preventDefault();
+        if( $('#table').length ) {
+            resetTableHeight();
+        }
+    })
+    $('.filter-panel').on('hidden.bs.collapse', function (e) {
+        if( $('#table').length ) {
+            resetTableHeight();
+        }
+    })
+</script>
+
+{# populate form from previous request #}
+<script>
+    $(document).ready(function() {
+        {%-for key in form-%}
+            {%-if key in ('magnitude', 'exposure', 'azimuth', 'elevation',
+                            'seeing_nearest', 'seeing_median', 'lucky_strehl', 'faint_strehl')-%}
+                $("#{{ key }}").slider('setValue', [{{ form[key] }}]);
+            {%-else-%}
+                {%-if form[key] == 'on'-%}
+                    $('#{{ key }}').prop('checked', true);
+                {%-else-%}
+                    $('#{{ key }}').val('{{ form[key] }}');
+                {%-endif-%}
+            {%-endif-%}
+        {%-endfor-%}
+
+        $('.slider-selection').css('background', 'green');
+    })
+</script>
+
+<script>
+    // clear table with FITS header (in case it's not empty) before displaying current table
+    function clearTable() {
+        $('#headerTable').html('');
+    }
+
+    // send AJAX GET request to server to get source FITS header
+    function getHeader(source) {
+        $.getJSON($SCRIPT_ROOT + '/_get_fits_header', {
+            source: source
+        }, function(data) {
+            var header = data.result;
+            $('#headerTabLoading').hide();
+            for (var key in header) {
+                if (key != 'COMMENT') {
+                    var $formrow = '<tr><td>'+key+'</td>'+
+                            '<td>'+header[key][0]+'</td>'+
+                            '<td>'+header[key][1]+'</td>'+'</tr>';
+                    $('#headerTable').append($formrow);
+                }
+            }
+        });
+        return false;
+    }
+
+    // clear tab with external images
+    function clearExternalImages() {
+        $('#dss2_r').hide();
+        $('#2mass_h').hide();
+    }
+
+    // send AJAX GET request to server to get external VO images of the field
+    function getExternalImages(source) {
+        $.getJSON($SCRIPT_ROOT + '/_get_vo_image', {
+            source: source
+        }, function(data) {
+            var images = data.result;
+            $('#externalImagesTabLoading').hide();
+            for (var key in images) {
+                $('#'+key).show();
+                $('#'+key+'_image').attr('src', 'data:image/png;base64,' + images[key]);
+            }
+        });
+        return false;
+    }
+
+    {% if user == 'admin' %}
+    // send AJAX GET request to server to force redo stuff
+    function forceRedo(source, pipe) {
+        bootbox.confirm({
+            title: "Force redo?",
+            message: "Do you want to force redo " + pipe + " pipeline for " + source + "?",
+            buttons: {
+                cancel: {
+                    label: '<i class="fa fa-times"></i> Cancel'
+                },
+                confirm: {
+                    label: '<i class="fa fa-check"></i> Confirm'
+                }
+            },
+            callback: function (result) {
+                // console.log('This was logged in the callback: ' + result);
+                // confirmed? send AJAX request to server:
+                if (result) {
+                    $.getJSON($SCRIPT_ROOT + '/_force_redo', {
+                        source: source,
+                        pipe: pipe
+                    }, function(status) {
+                        var enqueued = status.result;
+{#                        console.log(enqueued);#}
+{#                        console.log(enqueued['status']);#}
+                        if (enqueued['success']) {
+                            // turn badge yellow if successfully enqueued
+                            document.getElementById(source + "_" + pipe).setAttribute('class', 'label label-warning');
+                        }
+                    });
+                }
+            }
+        });
+
+    }
+    {% endif %}
+
+    // Build modal with source data on-the-fly
+    $('#sourceModal').on('show.bs.modal', function (event) {
+        // show images tab by default:
+        $('#sourceTabs a[href="#luckyImagesTab"]').tab('show'); // Select tab by name
+
+        var trigger = $(event.relatedTarget); // Who triggered the modal? [to extract source info]
+        // Extract info from data-* attributes
+        var date = trigger.data('date'); // date of observation
+        var source = trigger.data('source'); // full source name (including prog_num, filt etc)
+        var lucky = trigger.data('lucky'); // lucky data?
+        var lucky_strehl = trigger.data('lucky-strehl'); // lucky data?
+        var lucky_pca = trigger.data('lucky-pca'); // lucky data?
+        var faint = trigger.data('faint'); // lucky data?
+        var faint_strehl = trigger.data('faint-strehl'); // lucky data?
+        var faint_pca = trigger.data('faint-pca'); // lucky data?
+
+        // download link:
+        $('#previewModalDonloadLink').attr('href', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/' + source + '.tar.bz2');
+
+        //var cc = trigger.data('cc'); // type of contrast curve
+        // Strehl
+        //var core = trigger.data('core'); // type of contrast curve
+        //var halo = trigger.data('halo'); // type of contrast curve
+        //var fwhm = trigger.data('fwhm'); // type of contrast curve
+        //var sr_flag = trigger.data('sr_flag'); // type of contrast curve
+        // If necessary, you could initiate an AJAX request here (and then do the updating in a callback).
+        // Update the modal's content. We'll use jQuery here,
+        // but one could use a data binding library or other methods instead.
+        var modal = $(this);
+        modal.find('.modal-title').text(source);
+        // lucky pipeline
+        if (JSON.parse(lucky.toLowerCase())) {
+            $('#luckyImagesTabContent').show();
+            $('#luckyImagesTabEmpty').hide();
+            modal.find('#lucky_sou_full').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/automated/preview/' + source + '_full.png');
+            modal.find('#lucky_sou_cropped').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/automated/preview/' + source + '_cropped.png');
+            // pca
+            if (JSON.parse(lucky_pca.toLowerCase())) {
+                $('#lucky_sou_pca_label').show();
+                $('#lucky_sou_pca').show();
+                modal.find('#lucky_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/automated/pca/' + source + '_pca.png');
+                $('#lucky_sou_cc').show();
+                modal.find('#lucky_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/automated/pca/' + source + '_contrast_curve.png');
+            }
+            else {
+                $('#lucky_sou_pca_label').hide();
+                $('#lucky_sou_pca').hide();
+                modal.find('#lucky_sou_pca').attr('src', '');
+                $('#lucky_sou_cc').hide();
+                modal.find('#lucky_sou_cc').attr('src', '');
+            }
+            // strehl
+            if (JSON.parse(lucky_strehl.toLowerCase())) {
+
+            }
+            else {
+
+            }
+        }
+        else {
+            $('#luckyImagesTabContent').hide();
+            $('#luckyImagesTabEmpty').show();
+        }
+
+        // faint pipeline
+        if (JSON.parse(faint.toLowerCase())) {
+            $('#faintImagesTabContent').show();
+            $('#faintImagesTabEmpty').hide();
+            modal.find('#faint_sou_full').attr('src', '{{-script_root-}}/data/'+date+'/'+
+                    source+'/faint/preview/'+source+'_full.png');
+            modal.find('#faint_sou_cropped').attr('src', '{{-script_root-}}/data/'+date+'/'+
+                    source+'/faint/preview/'+source+'_cropped.png');
+            // pca
+            if (JSON.parse(faint_pca.toLowerCase())) {
+                $('#faint_sou_pca_label').show();
+                $('#faint_sou_pca').show();
+                modal.find('#faint_sou_pca').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/faint/pca/' + source + '_pca.png');
+                $('#faint_sou_cc').show();
+                modal.find('#faint_sou_cc').attr('src', '{{-script_root-}}/data/' + date + '/' +
+                    source + '/faint/pca/' + source + '_contrast_curve.png');
+            }
+            else {
+                $('#faint_sou_pca_label').hide();
+                $('#faint_sou_pca').hide();
+                modal.find('#faint_sou_pca').attr('src', '');
+                $('#faint_sou_cc').hide();
+                modal.find('#faint_sou_cc').attr('src', '');
+            }
+            // strehl
+            if (JSON.parse(faint_strehl.toLowerCase())) {
+
+            }
+            else {
+
+            }
+        }
+        else {
+            $('#faintImagesTabContent').hide();
+            $('#faintImagesTabEmpty').show();
+        }
+
+        // prepare to generate table with header data
+        clearTable();
+        $('#headerTabLoading').show();
+{#        getHeader(source);#}
+
+        // prepare to fetch external vo images of the field
+        clearExternalImages();
+        $('#externalImagesTabLoading').show();
+{#        getExternalImages(source);#}
+
+        // set source name inside a hidden div in the modal to be picked by async loading functions
+        $('#modalSourceName').data('source', source);
+    });
+    // tabs in the modal
+    $('#sourceTabs a').click(function (e) {
+        e.preventDefault();
+        $(this).tab('show')
+    });
+    // load FITS header on tab show only to minimize unwanted traffic:
+    $('a[href="#headerTab"]').on('shown.bs.tab', function (event) {
+        getHeader($('#modalSourceName').data('source'));
+    });
+    // load external stuff on tab show only to minimize unwanted traffic:
+    $('a[href="#externalImagesTab"]').on('shown.bs.tab', function (event) {
+{#        var target = $(event.target).attr("href"); // activated tab#}
+{#        alert($('#modalSourceName').data('source'));#}
+        getExternalImages($('#modalSourceName').data('source'));
+    });
+
+</script>
+
+{#<div id="notifications" style="max-width: 150px;"></div>#}
+{# get flashing messages from the server #}
+{#{% with messages = get_flashed_messages() %}#}
+{#   {% if messages %}#}
+{#      {% for message in messages %}#}
+{#         {{ message }}#}
+{#      {% endfor %}#}
+{#   {% endif %}#}
+{#{% endwith %}#}
+
+{# show info #}
+<script>
+    {% if form | length > 0 %}
+        $(document).ready(function() {
+            $.notify({
+                title: '<strong>Info:</strong>',
+                {% if obs | length > 0 %}
+                    message: 'Found {{ obs | length }} observations.',
+                {% else %}
+                    message: 'No matches found.'
+                {% endif %}
+            },{
+                type: 'info',
+                offset: {
+                    x: 50,
+                    y: 70
+                },
+                template: '<div data-notify="container" class="col-xs-11 col-sm-3 alert alert-{0}" role="alert" ' +
+                               'style="max-width:300px">' +
+                            '<button type="button" aria-hidden="true" class="close" data-notify="dismiss">×</button>' +
+                            '<span data-notify="icon"></span> ' +
+                            '<span data-notify="title">{1}</span> ' +
+                            '<span data-notify="message">{2}</span>' +
+                            '<div class="progress" data-notify="progressbar">' +
+                                '<div class="progress-bar progress-bar-{0}" role="progressbar" aria-valuenow="0" ' +
+                'aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>' +
+                            '</div>' +
+                            '<a href="{3}" target="{4}" data-notify="url"></a>' +
+                        '</div>'
+            });
+        });
+    {% endif %}
+</script>
+
+{# show/hide search query panel #}
+<script>
+    function showHideQueryBox(key) {
+        if ($("#query-box-dropdown").children("span").attr("class") == "glyphicon glyphicon-menu-up") {
+            $("#query-box-dropdown").children("span").attr("class",
+                "glyphicon glyphicon-menu-down");
+            document.getElementById("query-box").style.display = "none";
+            // reset height of table with search results
+            resetTableHeight();
+        }
+        else { if ($("#query-box-dropdown").children("span").attr("class") == "glyphicon glyphicon-menu-down") {
+            $("#query-box-dropdown").children("span").attr("class",
+                "glyphicon glyphicon-menu-up");
+            document.getElementById("query-box").style.display = "block";
+            // reset height of table with search results
+            if( $('#table').length ) {
+                resetTableHeight();
+            }
+        } }
+    }
+
+    {%-if obs | length > 0 and (form['output_table'] == 'on' or form['output_thumbnail'] == 'on')-%}
+        $( window ).load(setTimeout(function() {
+            {# collapse query panel #}
+            showHideQueryBox();
+        }, 1200));
+    {%-endif-%}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,452 @@
+{# set root path in case if run from sub-url #}
+{% set script_root = '' if request.script_root == '/' else request.script_root %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="">
+    <meta name="author" content="Dmitry A. Duev">
+    <link rel="icon" type="image/png" href="{{-script_root-}}/static/robot-favicon.png">
+
+    <title>Robo-AO data archive</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap.min.css">
+    {#    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-magnify.min.css">#}
+
+    <style>
+        html {
+            position: relative;
+            min-height: 100%;
+        }
+        body {
+            /* Margin bottom by footer height */
+            margin-bottom: 60px;
+        }
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            /* Set the fixed height of the footer here */
+            height: 60px;
+            background-color: #f5f5f5;
+        }
+        .footer > .container {
+            padding-top: 20px;
+            padding-right: 15px;
+            padding-left: 15px;
+            text-align: center;
+        }
+        .main-container {
+            padding: 40px 15px;
+            text-align: center;
+        }
+        .carousel-fade .carousel-inner .item {
+            opacity: 0;
+            -webkit-transition: opacity 0.5s;
+            -moz-transition: opacity 0.5s;
+            -o-transition: opacity 0.5s;
+            transition: opacity 0.5s;
+        }
+        .carousel-control {
+            background-image: none !important; /* remove background gradients on controls */
+        }
+        .carousel-fade .carousel-inner .active {
+            opacity: 1;
+        }
+        .carousel-fade .carousel-inner .active.left,
+        .carousel-fade .carousel-inner .active.right {
+            left: 0;
+            opacity: 0;
+            z-index: 1;
+        }
+        .carousel-fade .carousel-inner .next.left,
+        .carousel-fade .carousel-inner .prev.right {
+            opacity: 1;
+        }
+        .carousel-fade .carousel-control {
+            z-index: 2;
+        }
+        @media all and (transform-3d), (-webkit-transform-3d) {
+            .carousel-fade .carousel-inner > .item.next,
+            .carousel-fade .carousel-inner > .item.active.right {
+                opacity: 0;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+            .carousel-fade .carousel-inner > .item.prev,
+            .carousel-fade .carousel-inner > .item.active.left {
+                opacity: 0;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+            .carousel-fade .carousel-inner > .item.next.left,
+            .carousel-fade .carousel-inner > .item.prev.right,
+            .carousel-fade .carousel-inner > .item.active {
+                opacity: 1;
+                -webkit-transform: translate3d(0, 0, 0);
+                transform: translate3d(0, 0, 0);
+            }
+        }
+        #carouselButtons {
+            text-align: center;
+            cursor: pointer;
+        }
+        #carousel-play {
+            width: 70%;
+            margin-top: 75px;
+            margin-left: 15%;
+            margin-right: auto;
+            display: block;
+        }
+        #carousel-pause {
+            width: 100%;
+            margin: 75px auto;
+            display: none;
+        }
+        .img-wrapper {
+            position: relative;
+            display:inline-block;
+        }
+        .overlay {
+            transition: opacity 0.3s ease-out;
+            opacity: 0;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            text-align:left;
+        }
+
+        .img-wrapper:hover .overlay {
+            position:absolute;
+            top:0;
+            left:0;
+            opacity: 0.7;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+            padding:12px;
+            font-size:10px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="alert alert-danger fade in" id="add-failed"
+     role="alert" style="margin-bottom:0; display:none">
+    <a href="#" class="close" onclick="$('#add-failed').slideUp('fast');">&times;</a>
+    <strong>Error!</strong> Failed to add a user.
+</div>
+<div class="alert alert-danger fade in" id="edit-failed"
+     role="alert" style="margin-bottom:0; display:none">
+    <a href="#" class="close" onclick="$('#edit-failed').slideUp('fast');">&times;</a>
+    <strong>Error!</strong> Failed to edit a user.
+</div>
+<div class="alert alert-danger fade in" id="remove-failed"
+     role="alert" style="margin-bottom:0; display:none">
+    <a href="#" class="close" onclick="$('#remove-failed').slideUp('fast');">&times;</a>
+    <strong>Error!</strong> Failed to remove a user.
+</div>
+
+<!-- Fixed navbar -->
+<nav class="navbar navbar-default navbar-static-top">
+    <div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed"
+                    data-toggle="collapse" data-target="#navbar"
+                    aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="{{-script_root-}}/">Robo-AO data archive</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+            <ul class="nav navbar-nav">
+                <li><a href="{{-script_root-}}/">Data</a></li>
+                <li><a href="{{-script_root-}}/search">Search</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown">
+                    <a href="#" class="dropdown-toggle" data-toggle="dropdown"
+                       role="button" aria-haspopup="true" aria-expanded="false">Logged in as
+                        <strong><span class="text-info">{{ user }}</span></strong> <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                        {# administration tasks #}
+                        {% if user == 'admin' %}
+                            <li><a href="{{-script_root-}}/manage_users">Manage users</a></li>
+                            <li><a href="{{-script_root-}}/manage_psflib">Manage PSF library</a></li>
+                            {# Manage reobserving requests #}
+                            {#<li><a href="manage_requests">Manage requests</a></li> #}
+                            <li class='disabled'><a href="#">Manage requests</a></li>
+                            {# View system logs #}
+                            {#<li><a href="view_logs">View logs</a></li>#}
+                            <li class='disabled'><a href="#">View logs</a></li>
+                        {% endif %}
+                        <li><a href="{{-script_root-}}/logout">Log out</a></li>
+                    </ul>
+                </li>
+
+            </ul>
+        </div><!--/.nav-collapse -->
+    </div>
+</nav>
+
+<!-- Main section -->
+
+<div class="container">
+    <div class="col-md-12">
+        <h2>
+            Manage user access
+            <button type="button" class="btn btn-info"
+                    data-toggle="modal" data-target="#addUserModal"
+                    data-user="" data-programs="">Add user</button>
+        </h2><br>
+    </div>
+
+    {% if users|length > 0 %}
+        <div class="col-md-6">
+            <table class="table table-condensed table-hover tablesorter" id="user-table">
+                <thead>
+                    <tr>
+                        <th style="cursor: pointer; cursor: hand;">username</th>
+                        <th style="cursor: pointer; cursor: hand;">programs</th>
+                        <th style="width:20%"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for usr in users %}
+                    <tr class="clickable-row">
+                    <td>{{ usr }}</td>
+                    <td>
+                        {{ users[usr]['programs'] | join(', ') }}
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-xs btn-primary editButton"
+                                data-toggle="modal" data-target="#editUserModal"
+                                data-user="{{ usr }}"
+                                data-programs="{{ users[usr]['programs'] | join(', ') }}">
+                        edit</button>
+                        <button type="button" class="btn btn-xs btn-danger removeButton"
+                                data-user="{{ usr }}">
+                        remove</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+
+
+<footer class="footer">
+    <div class="container">
+        <p class="text-muted">&copy; Robo-AO 2016-{{ current_year }}</p>
+    </div>
+</footer>
+
+
+<!-- Modal to add a user-->
+<div class="modal fade" tabindex="-1" role="dialog" id="addUserModal" >
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"
+                        aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">Manage user access</h4>
+            </div>
+            <div class="modal-body">
+                <form id="tempAddUser">
+                    <div class="form-group">
+                        <label for="form-usr">username</label>
+                        <input id="form-usr" type="text" class="form-control"
+                               name="user" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="form-pwd">password</label>
+                        <input type="text" class="form-control" name="password" id="form-pwd"
+                               placeholder=""
+                               autocomplete="address-level4">
+                    </div>
+                    <div class="form-group">
+                        <label for="form-programs">programs</label>
+                        <input id="form-programs" type="text" class="form-control"
+                               name="programs" autocomplete="off"
+                               placeholder="if>1, separate with commas">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="addUserButton">Add user</button>
+            </div>
+        </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+</div><!-- /.modal -->
+<!-- End Modal -->
+
+<!-- Modal to edit a user-->
+<div class="modal fade" tabindex="-1" role="dialog" id="editUserModal" >
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal"
+                        aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">Manage user access</h4>
+            </div>
+            <div class="modal-body">
+                <form id="tempEditUser">
+                    <div class="form-group">
+                        <label for="form-edit-usr">username</label>
+                        <input id="form-edit-usr" type="text" class="form-control"
+                               name="edit-user" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="form-edit-pwd">password</label>
+                        <input type="text" class="form-control" name="edit-password" id="form-edit-pwd"
+                               placeholder="leave empty to keep the current password"
+                               autocomplete="address-level4">
+                    </div>
+                    <div class="form-group">
+                        <label for="form-edit-programs">programs</label>
+                        <input id="form-edit-programs" type="text" class="form-control"
+                               name="edit-programs" autocomplete="off"
+                               placeholder="if>1, separate with commas">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="editUserButton">Save</button>
+            </div>
+        </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+</div><!-- /.modal -->
+<!-- End Modal -->
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script type="text/javascript" src="{{-script_root-}}/static/js/jquery.tablesorter.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap.min.js"></script>
+<script src="//oss.maxcdn.com/bootbox/4.4.0/bootbox.min.js"></script>
+<script>
+    // for AJAX requests [absolute website's uri]:
+    $SCRIPT_ROOT = {{ request.script_root|tojson|safe }};
+    // global var to keep track of user name changes
+    var user_keep;
+
+    $(document).ready(function() {
+        // call the tablesorter plugin
+        $("#user-table").tablesorter({
+            // sort on the first column and third column, order asc
+            sortList: [[0,0]]
+        });
+    });
+
+    // send AJAX GET request to server
+    $('#addUserButton').click(function (e) {
+        $.ajax({url: '{{-script_root-}}/add_user?' + $('#tempAddUser').serialize(),
+                method: 'GET',
+                success: function(data) {
+                    if (data=='success') {
+                        location.reload(true);
+                    }
+                    else {
+                        $('#addUserModal').modal('hide');
+                        $("#add-failed").slideDown("slow");
+                    }
+                },
+                error: function(data) {
+                    $('#addUserModal').modal('hide');
+                    $("#add-failed").slideDown("slow");
+                }
+        });
+        return false;
+    });
+
+    // remove a user
+    $('.removeButton').click(function (e) {
+        // Extract info from data-* attributes
+        var user = $(this).data('user');
+        bootbox.confirm("Are you sure?", function(result) {
+            if (result) {
+                $.ajax({url: '{{-script_root-}}/remove_user?user=' + user,
+                        method: 'GET',
+                        success: function(data) {
+                            if (data=='success') {
+                                location.reload(true);
+                            }
+                            else {
+                                $("#remove-failed").slideDown("slow");
+                            }
+                        },
+                        error: function(data) {
+                            $("#remove-failed").slideDown("slow");
+                        }
+                });
+            }
+        });
+        return false;
+    });
+
+    // edit a user
+    $('#editUserButton').click(function (e) {
+        // Extract info from data-* attributes
+        var _user = user_keep;
+        var user = $(this).data('user');
+        bootbox.confirm("Save changes?", function(result) {
+            if (result) {
+                $.ajax({url: '{{-script_root-}}/edit_user?' + $('#tempEditUser').serialize() +'&_user=' + _user,
+                        method: 'GET',
+                        success: function(data) {
+                            if (data=='success') {
+                                location.reload(true);
+                            }
+                            else {
+                                $('#editUserModal').modal('hide');
+                                $("#edit-failed").slideDown("slow");
+                            }
+                        },
+                        error: function(data) {
+                            $('#editUserModal').modal('hide');
+                            $("#edit-failed").slideDown("slow");
+                        }
+                });
+            }
+        });
+        return false;
+    });
+
+    // Build modal on-the-fly
+    $('#editUserModal').on('show.bs.modal', function (event) {
+        var trigger = $(event.relatedTarget); // Who triggered the modal? [to extract info]
+        // Extract info from data-* attributes
+        var user = trigger.data('user');
+        // global var to keep track of name changes:
+        user_keep = trigger.data('user');
+        var programs = trigger.data('programs');
+        var modal = $(this);
+        modal.find("#form-edit-usr").val(user);
+        modal.find("#form-edit-pwd").val('');
+        modal.find("#form-edit-programs").val(programs);
+    });
+</script>
+
+</body>
+</html>

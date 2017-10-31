@@ -1,0 +1,619 @@
+{# set root path in case if run from sub-url #}
+{% set script_root = '' if request.script_root == '/' else request.script_root %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="">
+    <meta name="author" content="Dmitry A. Duev">
+    <link rel="icon" type="image/png" href="{{-script_root-}}/static/robot-favicon.png">
+
+    <title>Robo-AO data archive: manage PSF library</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-magnify.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/daterangepicker.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-submenu.min.css">
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/bootstrap-slider.min.css">
+
+    <link rel="stylesheet" href="{{-script_root-}}/static/css/animate.css">
+
+    <style>
+        html {
+            position: relative;
+            min-height: 100%;
+{#            -webkit-backface-visibility: hidden;#}
+        }
+        body {
+            padding-top: 70px;
+            /* Margin bottom by footer height */
+            margin-bottom: 60px;
+        }
+        .table-condensed>thead>tr>th, .table-condensed>tbody>tr>th,
+        .table-condensed>tfoot>tr>th, .table-condensed>thead>tr>td,
+        .table-condensed>tbody>tr>td, .table-condensed>tfoot>tr>td {
+            padding: 1px;
+            font-size: 9px;
+        }
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            /* Set the fixed height of the footer here */
+            height: 60px;
+            background-color: #f5f5f5;
+        }
+        .footer > .container {
+            padding-top: 20px;
+            padding-right: 15px;
+            padding-left: 15px;
+            text-align: center;
+        }
+        .img-wrapper {
+            position: relative;
+            display:inline-block;
+        }
+        .overlay {
+            transition: opacity 0.3s;
+            opacity: 0;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+            {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+
+        .overlay-show {
+            transition: opacity 0.3s ease-out;
+            opacity: 0.7;
+            position:absolute;
+            top:0;
+            left:0;
+            width: 100%;
+            height: 100%;
+            display:inline-block;
+            padding:12px;
+            font-size:10px;
+            background:#ffffff;
+            text-align:left;
+            color:#111111;
+            {# prevent flicker on transition #}
+            -webkit-backface-visibility: hidden;
+        }
+
+        .back-to-top {
+            cursor: pointer;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display:none;
+        }
+    </style>
+
+</head>
+
+<body>
+
+<!-- Fixed navbar -->
+<nav class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed"
+                    data-toggle="collapse" data-target="#navbar"
+                    aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="{{-script_root-}}/">Robo-AO data archive</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+            <ul class="nav navbar-nav">
+                <li><a href="{{-script_root-}}/">Data</a></li>
+                <li><a href="{{-script_root-}}/search">Search</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown">
+                    <a href="#" class="dropdown-toggle" data-toggle="dropdown"
+                       role="button" aria-haspopup="true" aria-expanded="false">Logged in as
+                        <strong><span class="text-info">{{ user }}</span></strong> <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                        {# administration tasks #}
+                        {% if user == 'admin' %}
+                            <li><a href="{{-script_root-}}/manage_users">Manage users</a></li>
+                            <li><a href="{{-script_root-}}/manage_psflib">Manage PSF library</a></li>
+                            {# Manage reobserving requests #}
+                            {#<li><a href="manage_requests">Manage requests</a></li> #}
+                            <li class='disabled'><a href="#">Manage requests</a></li>
+                            {# View system logs #}
+                            {#<li><a href="view_logs">View logs</a></li>#}
+                            <li class='disabled'><a href="#">View logs</a></li>
+                        {% endif %}
+                        <li><a href="{{-script_root-}}/logout">Log out</a></li>
+                    </ul>
+                </li>
+
+            </ul>
+        </div><!--/.nav-collapse -->
+    </div>
+</nav>
+
+<!-- Main section -->
+
+{# content is streamed date by date from the server #}
+{% if dates %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-8">
+                <h2>
+                    Manage PSF library
+                </h2>
+            </div>
+            <div class="col-md-4">
+                <h2>
+                    <div class="form-group">
+                        <div class="input-group">
+                            <input type="text" name="daterange" id="daterange" class="form-control"
+                               style="cursor: pointer"/>
+                            <span class="input-group-addon" style="cursor: pointer" onclick="$('#daterange').click();">
+                                <span class="glyphicon glyphicon-calendar"></span>
+                            </span>
+                        </div>
+                    </div>
+                </h2>
+            </div>
+        </div>
+    </div>
+
+    {% if num_dates > 0 %}
+        <div class="container">
+            <div class="row">
+                <div class="col-md-12">
+                    {# change preview size #}
+                    <div style="margin-top: 10px;">
+                        <span style="margin-right: 10px;">Thumbnail size:</span>
+                        <input id="preview_size" type="text" data-slider-min="50" data-slider-max="400"
+                           data-slider-step="1" data-slider-value="120"/>
+                        <span style="margin-left: 10px;"><span id="preview_size_val">120</span>&nbsp;px</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    {% for date, data in dates %}
+
+        {# No science/aux data for the requested period at all #}
+        {% if None in (date, data) %}
+
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="alert alert-warning alert-dismissible fade in" role="alert" id="alert-no-data">
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                            No PSF data to show for the requested date(s).
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <br>
+        {% elif data | length > 0 %}
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-12">
+                        <h3 style="color: #286090">
+                            {{ date[:4]+'/' + date[4:6]+'/' + date[6:] }}
+                            <button id="button_{{ object }}" type="button" class="btn btn-sm btn-default"
+                                    onclick="rerun_pca_date('{{ date }}');">
+                                Rerun PCA pipeline</button>
+                        </h3>
+                        {% for object in data %}
+                            <div class="img-wrapper">
+                                <div>
+                                    <img src="{{-script_root-}}/data/{{date}}/summary/psflib/{{object}}.png"
+                                         alt="{{ object }}"
+                                         style="height:120px; cursor: pointer; margin-bottom: 3px;"
+                                         class="preview pop">
+
+                                    <div class="overlay" data-toggle="modal" data-target="#aux_image_modal"
+                                         data-date="{{date}}"
+                                         data-source="{{ object }}"
+                                         style="cursor: pointer; word-wrap: break-word;">
+                                         {{object}}
+                                    </div>
+                                </div>
+                                <div style="position:relative; bottom:0; left: 0; margin-bottom: 5px;">
+                                    {% if data[object]['in_lib'] and not data[object]['enqueued'] %}
+                                        <button id="button_{{ object }}" type="button" class="btn btn-xs btn-success"
+                                                onclick="enqueue_lib('{{ date }}', '{{ object }}', 'remove');">in lib</button>
+                                    {% elif data[object]['in_lib'] and data[object]['updated'] %}
+                                        <button id="button_{{ object }}" type="button" class="btn btn-xs btn-warning"
+                                                onclick="enqueue_lib('{{ date }}', '{{ object }}', 'add');">
+                                            in lib (outdated)</button>
+                                    {% elif data[object]['in_lib'] and data[object]['enqueued'] %}
+                                        <button id="button_{{ object }}" type="button" class="btn btn-xs btn-warning disabled">
+                                            in lib (enqueued)</button>
+                                    {% elif (not data[object]['in_lib']) and (not data[object]['enqueued']) %}
+                                        <button id="button_{{ object }}" type="button" class="btn btn-xs btn-danger"
+                                                onclick="enqueue_lib('{{ date }}', '{{ object }}', 'add');">
+                                            not in lib</button>
+                                    {% elif (not data[object]['in_lib']) and (data[object]['enqueued']) %}
+                                        <button id="button_{{ object }}" type="button" class="btn btn-xs btn-warning disabled">
+                                            not in lib (enqueued)</button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    {% endfor %}
+{% else %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <h1>No PSF data to show</h1>
+            </div>
+        </div>
+    </div>
+{% endif %}
+<br>
+
+<footer class="footer">
+    <div class="container">
+        <p class="text-muted" id="years">&copy; Robo-AO 2016</p>
+    </div>
+</footer>
+
+
+<!-- Modal template to display aux images -->
+<div class="modal fade" id="aux_image_modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog"> {# modal-lg"> #}
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal">
+                    <span aria-hidden="true">&times;</span><span class="sr-only">Close</span>
+                </button>
+                <h4 class="modal-title"></h4>
+            </div>
+            <div class="modal-body">
+                <img src="" id="aux_image_preview" style="width: 100%;" >
+            </div>
+{#            <div class="modal-footer">#}
+{#                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>#}
+{#            </div>#}
+        </div>
+    </div>
+</div>
+
+<!-- Scroll to top -->
+<a id="back-to-top" href="#" class="btn btn-primary btn-md back-to-top"
+   role="button" title="Click to return on the top page"
+   data-toggle="tooltip" data-placement="left">
+    <span class="glyphicon glyphicon-chevron-up"></span>
+</a>
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap.min.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-magnify.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-notify.js"></script>
+<script src="{{-script_root-}}/static/js/moment.min.js"></script>
+<script src="{{-script_root-}}/static/js/daterangepicker.js"></script>
+<script src="{{-script_root-}}/static/js/bootbox.js"></script>
+<script src="{{-script_root-}}/static/js/bootstrap-slider.min.js"></script>
+
+<script>
+    // Change preview sizes with JQuery
+    $(document).ready(function() {
+        $("#preview_size").slider();
+        $("#preview_size").on("change", function (slideEvt) {
+            $("#preview_size_val").text(slideEvt.value.newValue);
+            // change preview sizes
+            $(".preview").css('height', slideEvt.value.newValue);
+        });
+    });
+</script>
+
+<script>
+    // for AJAX requests [absolute website's uri]:
+    $SCRIPT_ROOT = {{ request.script_root|tojson|safe }};
+
+    // switch tabs
+    $(document).ready(function() {
+        $('.data-tabs li a').click(function (e) {
+            e.preventDefault();
+            $(this).tab('show')
+        });
+    });
+
+    // switch tabs
+    function showAll(tabn) {
+        var arr = $("[id$=-nav-tabs]");
+        for (var i=0; i<arr.length; i++) {
+            $('#' + arr[i].id + ' li:eq(' + tabn + ') a').tab('show');
+        }
+    }
+
+    // toggle summary info
+    function toggle_summary(date) {
+        $('div[data-date='+date+']').each(function() {
+            $(this).toggleClass('overlay overlay-show');
+        });
+        //$('[data-date]').toggleClass('overlay overlay-show');
+    }
+
+    $(document).ready(function() {
+        $(".img-wrapper").hover(
+            function () {
+                $(this).find('div[data-date]').toggleClass('overlay overlay-show');
+                //$(this).find('div[data-date]').toggle()
+            }
+        )
+    });
+</script>
+<script>
+$(document).ready(function(){
+    $(window).scroll(function () {
+        if ($(this).scrollTop() > 50) {
+            $('#back-to-top').fadeIn();
+        }
+        else {
+            $('#back-to-top').fadeOut();
+        }
+    });
+    // scroll body to 0px on click
+    $('#back-to-top').click(function () {
+        $('#back-to-top').tooltip('hide');
+        $('body,html').animate({
+            scrollTop: 0
+        }, 300);
+        return false;
+    });
+
+    $('#back-to-top').tooltip('show');
+
+});
+</script>
+<script>
+$(".pop").on("click", function() {
+    $('#aux_image_preview').attr('src', $(this).attr('src'));
+    $('#aux_image_modal').modal('show');
+});
+
+$('#aux_image_modal').on('show.bs.modal', function (event) {
+
+    var trigger = $(event.relatedTarget); // Who triggered the modal? [to extract source info]
+    // Extract info from data-* attributes
+    var date = trigger.data('date'); // date of observation
+    var source = trigger.data('source'); // full source name
+
+    $('#aux_image_preview').attr('src', '{{-script_root-}}/data/'+date+'/summary/psflib/'+source+'.png');
+
+    // modal title:
+    var modal = $(this);
+    modal.find('.modal-title').text(source);
+});
+</script>
+
+{# daterangepicker #}
+<script type="text/javascript">
+$(function() {
+
+    var start = moment().utc().subtract(9, 'days').startOf('day');
+    var end = moment().utc();
+
+    function cb(start, end) {
+        $('#daterange').val(start.format('MMMM D, YYYY') + ' - ' + end.format('MMMM D, YYYY'));
+    }
+
+    $('#daterange').daterangepicker({
+        startDate: start,
+        endDate: end,
+        timePicker: true,
+        timePicker24Hour: true,
+        timePickerIncrement: 5,
+        locale: {
+            format: 'MMMM D, YYYY'
+        },
+        ranges: {
+           'Today': [moment().utc().startOf('day'), moment().utc().add(1, 'days').startOf('day')],
+           'Yesterday': [moment().utc().subtract(1, 'days').startOf('day'),
+                         moment().utc().startOf('day')],
+           'Last 7 Days': [moment().utc().subtract(6, 'days').startOf('day'),
+                           moment().utc().add(1, 'days').startOf('day')],
+           'Last 30 Days': [moment().utc().subtract(29, 'days').startOf('day'),
+                            moment().utc().add(1, 'days').startOf('day')],
+           'This Month': [moment().utc().startOf('month'),
+                          moment().utc().endOf('month')],
+           'Last Month': [moment().utc().subtract(1, 'month').startOf('month'),
+                          moment().utc().subtract(1, 'month').endOf('month')],
+           'Everything': [moment('20151001', 'YYYYMMDD'), moment().utc()]
+        },
+        minDate: moment('20151001', 'YYYYMMDD'),
+        maxDate: moment('20200101', 'YYYYMMDD'),
+        opens: "left"
+    }, cb);
+
+    cb(start, end);
+
+    $('#daterange').on('apply.daterangepicker', function(ev, picker) {
+        var start = picker.startDate.format('YYYYMMDD');
+        var stop = picker.endDate.format('YYYYMMDD');
+        window.location.href = "?start=" + start + "&stop=" + stop;
+    });
+
+});
+</script>
+
+{# current year for solidnost'#}
+<script>
+$(document).ready(function() {
+    var ynow = moment().format('YYYY');
+    $('#years').append('-'+ynow);
+});
+</script>
+
+{# show info #}
+<script>
+$(document).ready(function() {
+    $.notify({
+        title: '<strong>Info:</strong>',
+        {% if start != None and stop != None %}
+            {% set start_str = start[:4]+'/' + start[4:6]+'/' + start[6:] %}
+            {% set stop_str = stop[:4]+'/' + stop[4:6]+'/' + stop[6:] %}
+            message: 'Displaying data from {{ start_str }} to {{ stop_str }}.',
+        {% elif start == None and stop == None %}
+            message: 'Displaying data from the last 10 days.',
+        {% elif start == None %}
+            {% set stop_str = stop[:4]+'/' + stop[4:6]+'/' + stop[6:] %}
+            message: 'Displaying data from now to {{ stop_str }}.',
+        {% elif stop == None %}
+            {% set start_str = start[:4]+'/' + start[4:6]+'/' + start[6:] %}
+            message: 'Displaying data from {{ start_str }} to now.'
+        {% endif %}
+    },{
+        type: 'info',
+        offset: {
+            x: 50,
+            y: 70
+        },
+        template: '<div data-notify="container" class="col-xs-11 col-sm-3 alert alert-{0}" role="alert" ' +
+                       'style="max-width:300px">' +
+                    '<button type="button" aria-hidden="true" class="close" data-notify="dismiss">×</button>' +
+                    '<span data-notify="icon"></span> ' +
+                    '<span data-notify="title">{1}</span> ' +
+                    '<span data-notify="message">{2}</span>' +
+                    '<div class="progress" data-notify="progressbar">' +
+                        '<div class="progress-bar progress-bar-{0}" role="progressbar" aria-valuenow="0" ' +
+        'aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>' +
+                    '</div>' +
+                    '<a href="{3}" target="{4}" data-notify="url"></a>' +
+                '</div>'
+    });
+});
+</script>
+
+<script>
+    // send AJAX GET request to server to add PSF to library
+    function enqueue_lib(date, source, action) {
+        bootbox.confirm({
+            title: "PSF library",
+            message: "Do you want to " + action + " " + source + "?",
+            buttons: {
+                cancel: {
+                    label: '<i class="fa fa-times"></i> Cancel'
+                },
+                confirm: {
+                    label: '<i class="fa fa-check"></i> Confirm'
+                }
+            },
+            callback: function (result) {
+                // console.log('This was logged in the callback: ' + result);
+                // confirmed? send AJAX request to server:
+                if (result) {
+                    $.getJSON($SCRIPT_ROOT + '/_enqueue_lib', {
+                        date: date,
+                        source: source,
+                        action: action
+                    }, function(status) {
+                        var enqueued = status.result;
+{#                        console.log(enqueued);#}
+{#                        console.log(enqueued['status']);#}
+                        if (enqueued['success']) {
+                            // turn badge yellow if successfully enqueued
+                            document.getElementById("button_" + source).setAttribute('class', 'btn btn-xs btn-warning');
+                        }
+                    });
+                }
+            }
+        });
+
+    }
+
+    // send AJAX GET request to server to add PSF to library
+    function rerun_pca_date(date) {
+        bootbox.confirm({
+            title: "Rerun PCA pipeline",
+            message: "Do you want to rerun PSF subtraction for all sources observed on " + date + "?",
+            buttons: {
+                cancel: {
+                    label: '<i class="fa fa-times"></i> Cancel'
+                },
+                confirm: {
+                    label: '<i class="fa fa-check"></i> Confirm'
+                }
+            },
+            callback: function (result) {
+                // console.log('This was logged in the callback: ' + result);
+                // confirmed? send AJAX request to server:
+                if (result) {
+                    $.getJSON($SCRIPT_ROOT + '/_rerun_pca_date', {
+                        date: date
+                    }, function(status) {
+                        var enqueued = status.result;
+{#                        console.log(enqueued);#}
+{#                        console.log(enqueued['status']);#}
+                        if (enqueued['success']) {
+                            // notify!
+                            $.notify({
+                                title: '<strong>Success:</strong>',
+                                    message: 'Observations enqueued for reprocessing.'
+                            },{
+                                type: 'success',
+                                offset: {
+                                    x: 50,
+                                    y: 70
+                                },
+                                template: '<div data-notify="container" class="col-xs-11 col-sm-3 alert alert-{0}" role="alert" ' +
+                                               'style="max-width:300px">' +
+                                            '<button type="button" aria-hidden="true" class="close" data-notify="dismiss">×</button>' +
+                                            '<span data-notify="icon"></span> ' +
+                                            '<span data-notify="title">{1}</span> ' +
+                                            '<span data-notify="message">{2}</span>' +
+                                            '<div class="progress" data-notify="progressbar">' +
+                                                '<div class="progress-bar progress-bar-{0}" role="progressbar" aria-valuenow="0" ' +
+                                'aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>' +
+                                            '</div>' +
+                                            '<a href="{3}" target="{4}" data-notify="url"></a>' +
+                                        '</div>'
+                            });
+                        }
+                    });
+                }
+            }
+        });
+
+    }
+</script>
+
+{# propagate date ranges #}
+{% if request.args.get('start') != None and request.args.get('stop') != None %}
+<script>
+    $(document).ready(function() {
+        $('#daterange').data('daterangepicker').setStartDate(moment('{{ request.args.get('start') }}', 'YYYYMMDD'));
+        $('#daterange').data('daterangepicker').setEndDate(moment('{{ request.args.get('stop') }}', 'YYYYMMDD'));
+    });
+</script>
+{% endif %}
+</body>
+</html>

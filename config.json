@@ -71,6 +71,7 @@
     "nap_time_start": "23:30",
     "nap_time_stop": "04:00",
     "loop_interval": 0.2,
+    "vo_server": "http://skyview.gsfc.nasa.gov/cgi-bin/vo/sia.pl?",
 
     "help": {
       "self": "miscellaneous stuff",
@@ -81,7 +82,8 @@
       "nap_time_frame": "'local' or 'UTC'?",
       "nap_time_start": "HH:MM in 24-hour format",
       "nap_time_stop": "HH:MM in 24-hour format. could be next morning",
-      "loop_interval": "interval [minutes] to rerun the archiver if not nap time"
+      "loop_interval": "interval [minutes] to rerun the archiver if not nap time",
+      "vo_server": "external VO image server"
     }
   },
 
