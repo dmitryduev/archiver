@@ -192,6 +192,16 @@
       }
     },
 
+    "seeing": {
+      "fit_model": "Gaussian2D",
+      "win": 150,
+      "help": {
+        "fit_model": "Gaussian2D or Moffat2D",
+        "win": "box size",
+        "self": "pipeline to process nightly seeing data"
+      }
+    },
+
     "help": {
       "self": "define pipeline parameters here"
     }

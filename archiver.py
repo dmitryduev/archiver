@@ -28,6 +28,10 @@ import sys
 import json
 import logging
 import collections
+from sklearn import linear_model
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import make_pipeline
+from itertools import chain
 import pymongo
 from bson.json_util import loads, dumps
 import re
@@ -39,6 +43,7 @@ from skimage import exposure, img_as_float
 from copy import deepcopy
 import sewpy
 import lacosmicx as lax
+import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
 from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
 
@@ -1372,7 +1377,15 @@ class RoboaoArchiver(Archiver):
                             try:
                                 # we do this in a serial way, i.e. before proceeding with everything else
                                 # because calibration data are needed by everything else
-                                self.calibration(location, date, date_raw_data)
+                                s = self.calibration(location, date, date_raw_data)
+                                if s['status'] == 'ok' and s['message'] is not None:
+                                    self.update_db_entry(_collection='coll_aux', upd=s['db_record_update'])
+                                    self.logger.info('Updated auxiliary entry for {:s}'.format(date))
+                                    self.logger.debug(dumps(s['db_record_update']))
+                                elif s['status'] == 'error':
+                                    if 'db_record_update' in s:
+                                        self.update_db_entry(_collection='coll_aux', upd=s['db_record_update'])
+                                    raise RuntimeError(s['message'])
                             except Exception as _e:
                                 print(_e)
                                 # traceback.print_exc()
@@ -1385,6 +1398,17 @@ class RoboaoArchiver(Archiver):
                             # once done with aux data processing, get entry from aux collection in DB:
                             # look up aux entry for date in the database:
                             try:
+                                s = self.auxiliary(location, date, date_raw_data)
+                                if s['status'] == 'ok' and s['message'] is not None:
+                                    self.update_db_entry(_collection='coll_aux', upd=s['db_record_update'])
+                                    self.logger.info('Updated auxiliary entry for {:s}'.format(date))
+                                    self.logger.debug(dumps(s['db_record_update']))
+                                elif s['status'] == 'error':
+                                    if 'db_record_update' in s:
+                                        self.update_db_entry(_collection='coll_aux', upd=s['db_record_update'])
+                                    raise RuntimeError(s['message'])
+
+                                # reload aux data:
                                 aux_date = self.db['coll_aux'].find_one({'_id': date}, max_time_ms=5000)
                             except Exception as _e:
                                 print(_e)
@@ -1422,7 +1446,7 @@ class RoboaoArchiver(Archiver):
                                                   .format(date))
                                 continue
 
-                            # TODO: iterate over individual observations
+                            ''' iterate over individual observations '''
                             for obs in date_obs:
                                 try:
                                     # look up entry for obs in DB:
@@ -1495,7 +1519,32 @@ class RoboaoArchiver(Archiver):
                                     elif s['status'] == 'error':
                                         self.logger.error('{:s}, checking DB entry failed: {:s}'.format(obs,
                                                                                                         s['message']))
+                                        if 'db_record_update' in s:
+                                            self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('Corrected DB entry for {:s}'.format(obs))
+                                        # proceed to next obs:
+                                        continue
+                                except Exception as _e:
+                                    print(_e)
+                                    traceback.print_exc()
+                                    self.logger.error(_e)
+                                    self.logger.error('Raw files check failed for {:s}.'.format(obs))
+                                    continue
+
+                                try:
+                                    # check that DB entry reflects reality
+                                    s = roboao_obs.check_aux()
+                                    # discrepancy detected?
+                                    if s['status'] == 'ok' and s['message'] is not None:
                                         self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
+                                        self.logger.info('Corrected DB entry for {:s}'.format(obs))
+                                        self.logger.debug(dumps(s['db_record_update']))
+                                    # something failed?
+                                    elif s['status'] == 'error':
+                                        self.logger.error('{:s}, checking DB entry failed: {:s}'.format(obs,
+                                                                                                        s['message']))
+                                        if 'db_record_update' in s:
+                                            self.update_db_entry(_collection='coll_obs', upd=s['db_record_update'])
                                         self.logger.info('Corrected DB entry for {:s}'.format(obs))
                                         # proceed to next obs:
                                         continue
@@ -1607,7 +1656,7 @@ class RoboaoArchiver(Archiver):
                 self.logger.info('Finished archiving cycle.')
                 return False
 
-    @timeout(seconds_before_timeout=60)
+    @timeout(seconds_before_timeout=600)
     def load_darks_and_flats(self, _date, _mode, _filt, image_size_x=1024):
         """
             Load darks and flats
@@ -1860,19 +1909,368 @@ class RoboaoArchiver(Archiver):
                 # success!
                 # check new folder modified date:
                 time_tag = mdate_walk(_path_out)
-                # update DB entry:
-                self.db['coll_aux'].update_one(
-                    {'_id': _date},
-                    {
-                        '$set': {
-                            'calib.done': True,
-                            'calib.last_modified': time_tag
+                # # update DB entry:
+                # self.db['coll_aux'].update_one(
+                #     {'_id': _date},
+                #     {
+                #         '$set': {
+                #             'calib.done': True,
+                #             'calib.last_modified': time_tag
+                #         }
+                #     }
+                # )
+
+                return {'status': 'ok',
+                        'message': 'successfully generated master calibration files',
+                        'db_record_update': ({'_id': _date},
+                                             {
+                                                 '$set': {
+                                                     'calib.done': True,
+                                                     'calib.last_modified': time_tag
+                                                 }
+                                             }
+                                             )
                         }
-                    }
-                )
 
             else:
-                raise RuntimeError('No enough calibration files for {:s}'.format(_date))
+                return {'status': 'error',
+                        'message': 'No enough calibration files for {:s}'.format(_date)}
+        else:
+            return {'status': 'ok',
+                    'message': None}
+
+    # @timeout(seconds_before_timeout=600)
+    def process_seeing(self, _path_in, _seeing_frames, _path_calib, _path_out,
+                       _plate_scale=0.0351594, _fit_model='Gaussian2D', _box_size=100):
+        try:
+            # parse observation name
+            seeing_obs = RoboaoObservation(_id='9999_' + _seeing_frames[0], _config=self.config)
+            _filt, _date_utc = seeing_obs.db_entry['filter'], seeing_obs.db_entry['date_utc']
+            # get fits header
+            fits_header = get_fits_header(os.path.join(_path_in, '{:s}.fits'.format(_seeing_frames[0])))
+            _mode, _exp = str(fits_header['MODE_NUM'][0]), fits_header['EXPOSURE'][0]
+            # print(_filt, _date_utc, _mode, _exp)
+
+            # get total number of frames to allocate
+            # number of frames in each fits file
+            n_frames_files = []
+            for jj, _file in enumerate(_seeing_frames):
+                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file))) as _hdulist:
+                    if jj == 0:
+                        # get image size (this would be (1024, 1024) for the Andor camera)
+                        image_size = _hdulist[0].shape
+                    n_frames_files.append(len(_hdulist))
+                    # bar.update(iterations=files_sizes[jj])
+            # total number of frames
+            nf = sum(n_frames_files)
+
+            # Stack to seeing-limited image
+            summed_seeing_limited_frame = np.zeros(image_size, dtype=np.float)
+            for jj, _file in enumerate(_seeing_frames):
+                # print(jj)
+                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file))) as _hdulist:
+                    for ii, _ in enumerate(_hdulist):
+                        summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+
+            # load darks and flats
+            dark, flat = RoboaoPipeline.load_darks_and_flats(_path_calib, _mode, _filt, image_size[0])
+            if dark is None or flat is None:
+                raise Exception('Could not open darks and flats')
+
+            summed_seeing_limited_frame = RoboaoFaintStarPipeline.calibrate_frame(summed_seeing_limited_frame / nf,
+                                                                                  dark, flat, _iter=2)
+            summed_seeing_limited_frame = gaussian_filter(summed_seeing_limited_frame, sigma=1)
+
+            # remove cosmic rays:
+            # print('removing cosmic rays from the seeing limited image')
+            summed_seeing_limited_frame = \
+            lax.lacosmicx(np.ascontiguousarray(summed_seeing_limited_frame, dtype=np.float32),
+                          sigclip=20, sigfrac=0.3, objlim=5.0,
+                          gain=1.0, readnoise=6.5, satlevel=65536.0, pssl=0.0, niter=4,
+                          sepmed=True, cleantype='meanmask', fsmode='median',
+                          psfmodel='gauss', psffwhm=2.5, psfsize=7, psfk=None,
+                          psfbeta=4.765, verbose=False)[1]
+
+            # dump fits for sextraction:
+            _fits_stacked = '{:s}.summed.fits'.format(_seeing_frames[0])
+
+            export_fits(os.path.join(_path_in, _fits_stacked), summed_seeing_limited_frame)
+
+            _, x, y = RoboaoPipeline.trim_frame(_path_in, _fits_name=_fits_stacked,
+                                                _win=_box_size, _method='sextractor', _x=None, _y=None, _drizzled=False)
+            print('centroid position: ', x, y)
+
+            # remove fits:
+            os.remove(os.path.join(_path_in, _fits_stacked))
+
+            centroid = Star(x, y, summed_seeing_limited_frame, model_type=_fit_model, box=_box_size,
+                            plate_scale=_plate_scale, exp=_exp, out_path=os.path.join(_path_out, 'seeing'))
+            seeing, seeing_x, seeing_y = centroid.fwhm
+            print('Estimated seeing = {:.3f} pixels'.format(seeing))
+            print('Estimated seeing = {:.3f}\"'.format(seeing * _plate_scale))
+
+            if seeing < 10:
+                print('Estimated seeing suspiciously small, discarding.')
+                return _date_utc, None, None, _filt, None, None, _exp
+            else:
+                # plot image, model, and residuals:
+                # print('plotting seeing preview, see', os.path.join(_path_out, 'seeing'))
+                centroid.plot_resulting_model(frame_name=_seeing_frames[0])
+                # print('done')
+
+                return _date_utc, seeing * _plate_scale, seeing, _filt, \
+                       seeing_x * _plate_scale, seeing_y * _plate_scale, _exp
+
+        except Exception as _e:
+            print(_e)
+            traceback.print_exc()
+            try:
+                if os.path.exists(os.path.join(_path_in, _fits_stacked)):
+                    # remove fits:
+                    os.remove(os.path.join(_path_in, _fits_stacked))
+                return _date_utc, None, None, _filt, None, None, _exp
+            except Exception as _e:
+                print(_e)
+                traceback.print_exc()
+                return None, None, None, None, None, None, None
+
+    @timeout(seconds_before_timeout=600)
+    def auxiliary(self, _location, _date, _date_raw_data):
+        """
+            Handle auxiliary data
+
+            It is monitored for time out
+        :param _location:
+        :param _date:
+        :param _date_raw_data:
+        :return:
+        """
+
+        # DB entry:
+        _select = self.db['coll_aux'].find_one({'_id': _date}, max_time_ms=5000)
+
+        _path_out = os.path.join(self.config['path']['path_archive'], _date, 'summary')
+
+        # get calibration file names:
+        pattern_fits = r'.fits.bz2\Z'
+        date_seeing = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('seeing_', s) is not None]
+
+        # for each observation, count number of fits files with data:
+        date_seeing_num_fits = [np.count_nonzero([s in df for df in _date_raw_data]) for s in date_seeing]
+        # print(date_seeing_num_fits)
+        # stack with obs names:
+        _seeing_frames = list(zip(date_seeing, date_seeing_num_fits))
+
+        ''' check/do seeing '''
+        last_modified = _select['seeing']['last_modified'].replace(tzinfo=pytz.utc)
+        # path to store unzipped raw files
+        _path_tmp = self.config['path']['path_tmp']
+        # path to raw seeing data:
+        _path_seeing = os.path.join(_location, _date)
+        # path to calibration data:
+        _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
+
+        # _seeing_frames = _select['seeing']['frames']
+        # deal with long seeing observations properly
+        _seeing_raws = []
+        # unzipped file names:
+        _obsz = []
+        for _s in _seeing_frames:
+            _s_raws = ['{:s}.fits.bz2'.format(_s[0])]
+            _s_obsz = [_s[0]]
+            for _si in range(_s[1] - 1):
+                _s_raws.append('{:s}_{:d}.fits.bz2'.format(_s[0], _si))
+                _s_obsz.append('{:s}_{:d}'.format(_s[0], _si))
+            _seeing_raws.append(_s_raws)
+            _obsz.append(_s_obsz)
+
+        _seeing_data = [[_s[0], None, None, None, None, None, None] for _s in _seeing_frames]
+
+        # get plate scale:
+        if datetime.datetime.strptime(_date, '%Y%m%d').replace(tzinfo=pytz.utc) > \
+                datetime.datetime(2015, 9, 1).replace(tzinfo=pytz.utc):
+            telescope = 'KPNO_2.1m'
+        else:
+            telescope = 'Palomar_P60'
+        # this is not drizzled!
+        plate_scale = self.config['telescope'][telescope]['scale']
+
+        if len(_seeing_raws) > 0:
+            try:
+                time_tags = [max([datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_seeing, _ss)).st_mtime)
+                                  for _ss in _s]) for _s in _seeing_raws]
+                time_tag = max(time_tags)
+                time_tag = time_tag.replace(tzinfo=pytz.utc)
+
+                # not done or new files appeared in the raw directory
+                if ('seeing' not in _select) or (
+                        (not _select['seeing']['done'] or (time_tag - last_modified).total_seconds() > 1.0) and \
+                        (_select['seeing']['retries'] <= self.config['misc']['max_retries'])):
+
+                    # unbzip source file(s):
+                    lbunzip2(_path_in=_path_seeing, _files=list(chain.from_iterable(_seeing_raws)),
+                             _path_out=_path_tmp, _keep=True, _v=True)
+
+                    seeing_plot = []
+                    for ii, _obs in enumerate(_obsz):
+                        print('processing {:s}'.format(str(_obs)))
+                        # this returns datetime, seeing in " and in pix, and used filter:
+                        _date_utc, seeing, _, _filt, seeing_x, seeing_y, _exp = \
+                            self.process_seeing(_path_in=_path_tmp, _seeing_frames=_obs,
+                                                _path_calib=_path_calib, _path_out=_path_out,
+                                                _plate_scale=plate_scale,
+                                                _fit_model=self.config['pipeline']['seeing']['fit_model'],
+                                                _box_size=self.config['pipeline']['seeing']['win'])
+                        if seeing is not None:
+                            seeing_plot.append([_date_utc, seeing, _filt, _exp])
+                        _seeing_data[ii][1] = _date_utc
+                        _seeing_data[ii][2] = _filt
+                        _seeing_data[ii][3] = seeing
+                        _seeing_data[ii][4] = seeing_x
+                        _seeing_data[ii][5] = seeing_y
+                        _seeing_data[ii][6] = _exp
+
+                    # generate summary plot for the whole night:
+                    if len(seeing_plot) > 0:
+                        import matplotlib.pyplot as plt
+
+                        seeing_plot = np.array(seeing_plot)
+                        # sort by time stamp:
+                        seeing_plot = seeing_plot[seeing_plot[:, 0].argsort()]
+
+                        # filter colors on the plot:
+                        filter_colors = {'lp600': plt.cm.Blues(0.82),
+                                         'Sg': plt.cm.Greens(0.7),
+                                         'Sr': plt.cm.Reds(0.7),
+                                         'Si': plt.cm.Oranges(0.7),
+                                         'Sz': plt.cm.Oranges(0.5)}
+
+                        plt.close('all')
+                        fig = plt.figure('Seeing data for {:s}'.format(_date), figsize=(8, 3), dpi=200)
+                        ax = fig.add_subplot(111)
+
+                        # all filters used that night:
+                        filters_used = set(seeing_plot[:, 2])
+
+                        # plot different filters in different colors
+                        for filter_used in filters_used:
+                            fc = filter_colors[filter_used] if filter_used in filter_colors else plt.cm.Greys(0.7)
+
+                            # mask = seeing_plot[:, 2] == filter_used
+
+                            # short exposures:
+                            mask = np.all(np.vstack((seeing_plot[:, 2] == filter_used,
+                                                     seeing_plot[:, 3] <= 15.0)), axis=0)
+                            # print(filter_used, mask)
+                            if np.count_nonzero(mask) > 0:
+                                ax.plot(seeing_plot[mask, 0], seeing_plot[mask, 1], '.',
+                                        c=fc, markersize=8, label='{:s}, short exp'.format(filter_used))
+
+                            # long exposures:
+                            mask = np.all(np.vstack((seeing_plot[:, 2] == filter_used,
+                                                     seeing_plot[:, 3] > 15.0)), axis=0)
+                            # print(filter_used, mask)
+                            if np.count_nonzero(mask) > 0:
+                                ax.plot(seeing_plot[mask, 0], seeing_plot[mask, 1], '.',
+                                        c=fc, markersize=12, label='{:s}, long exp'.format(filter_used))
+
+                        ax.set_ylabel('Seeing, arcsec')  # , fontsize=18)
+                        ax.grid(linewidth=0.5)
+
+                        try:
+                            # make a robust fit to seeing data for visual reference
+                            t_seeing_plot = np.array([(_t - seeing_plot[0, 0]).total_seconds()
+                                                      for _t in seeing_plot[:, 0]])
+                            t_seeing_plot = np.expand_dims(t_seeing_plot, axis=1)
+                            estimators = [('RANSAC', linear_model.RANSACRegressor()), ]
+                            for name, estimator in estimators:
+                                model = make_pipeline(PolynomialFeatures(degree=5), estimator)
+                                model.fit(t_seeing_plot, seeing_plot[:, 1])
+                                y_plot = model.predict(t_seeing_plot)
+                                # noinspection PyUnboundLocalVariable
+                                ax.plot(seeing_plot[:, 0], y_plot, '--', c=plt.cm.Blues(0.4),
+                                        linewidth=1, label='Robust {:s} fit'.format(name), clip_on=True)
+                        except Exception as _e:
+                            print(_e)
+                            traceback.print_exc()
+
+                        myFmt = mdates.DateFormatter('%H:%M')
+                        ax.xaxis.set_major_formatter(myFmt)
+                        fig.autofmt_xdate()
+
+                        # make sure our 'robust' fit didn't spoil the scale:
+                        ax.set_ylim([np.min(seeing_plot[:, 1]) * 0.9, np.max(seeing_plot[:, 1]) * 1.1])
+                        dt = datetime.timedelta(seconds=(seeing_plot[-1, 0] -
+                                                         seeing_plot[0, 0]).total_seconds() * 0.05)
+                        ax.set_xlim([seeing_plot[0, 0] - dt, seeing_plot[-1, 0] + dt])
+
+                        # add legend:
+                        ax.legend(loc='best', numpoints=1, fancybox=True, prop={'size': 6})
+
+                        plt.tight_layout()
+
+                        # plt.show()
+                        f_seeing_plot = os.path.join(_path_out, 'seeing.{:s}.png'.format(_date))
+                        fig.savefig(f_seeing_plot, dpi=300)
+
+                    # update database record:
+                    s = {'status': 'ok',
+                         'message': 'successfully processed seeing data for {:s}'.format(_date),
+                         'db_record_update': ({'_id': _date},
+                                              {
+                                                  '$set': {
+                                                      'seeing.done': True,
+                                                      'seeing.frames': _seeing_data,
+                                                      'seeing.last_modified': time_tag
+                                                  },
+                                                  '$inc': {
+                                                      'seeing.retries': 1
+                                                  }
+                                              }
+                                              )
+                         }
+                else:
+                    s = {'status': 'ok', 'message': None}
+
+            except Exception as _e:
+                print(_e)
+                traceback.print_exc()
+                try:
+                    # clean up stuff
+                    seeing_summary_plot = os.path.join(_path_out, 'seeing.{:s}.png'.format(_date))
+                    if os.path.exists(seeing_summary_plot):
+                        os.remove(seeing_summary_plot)
+                    individual_frames_path = os.path.join(_path_out, 'seeing')
+                    for individual_frame in os.listdir(individual_frames_path):
+                        if os.path.exists(os.path.join(individual_frames_path, individual_frame)):
+                            os.remove(os.path.join(individual_frames_path, individual_frame))
+                finally:
+                    s = {'status': 'error',
+                         'message': 'failed to process seeing data for {:s}'.format(_date),
+                         'db_record_update': ({'_id': _date},
+                                              {
+                                                  '$set': {
+                                                      'seeing.done': False,
+                                                      'seeing.frames': [],
+                                                      'seeing.last_modified': utc_now()
+                                                  },
+                                                  '$inc': {
+                                                      'seeing.retries': 1
+                                                  }
+                                              }
+                                              )
+                         }
+
+            finally:
+                # remove unzipped files
+                _seeing_raws_unzipped = [os.path.splitext(_f)[0] for _f in chain.from_iterable(_seeing_raws)]
+                for _seeing_raw_unzipped in _seeing_raws_unzipped:
+                    if os.path.exists(os.path.join(_path_tmp, _seeing_raw_unzipped)):
+                        os.remove(os.path.join(_path_tmp, _seeing_raw_unzipped))
+        else:
+            s = {'status': 'ok', 'message': None}
+
+        return s
 
 
 class Observation(object):
@@ -1983,9 +2381,16 @@ class RoboaoObservation(Observation):
                             return {'status': 'ok',
                                     'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
                                     'db_record_update': ({'_id': self.id},
-                                                         {'$unset': {
-                                                             'pipelined.{:s}'.format(_pipe_name): 1
-                                                         }}
+                                                         {
+                                                             '$set': {
+                                                                 'distributed.status': False,
+                                                                 'distributed.location': [],
+                                                                 'distributed.last_modified': utc_now()
+                                                             },
+                                                             '$unset': {
+                                                                 'pipelined.{:s}'.format(_pipe_name): 1
+                                                             }
+                                                         }
                                                          )
                                     }
                 # path does not exist? make sure it's not present in DB entry and/or not marked 'done'
@@ -1993,9 +2398,16 @@ class RoboaoObservation(Observation):
                         self.db_entry['pipelined'][_pipe_name]['status']['done']:
                     return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
                             'db_record_update': ({'_id': self.id},
-                                                 {'$unset': {
-                                                     'pipelined.{:s}'.format(_pipe_name): 1
-                                                 }}
+                                                 {
+                                                     '$set': {
+                                                                 'distributed.status': False,
+                                                                 'distributed.location': [],
+                                                                 'distributed.last_modified': utc_now()
+                                                             },
+                                                     '$unset': {
+                                                         'pipelined.{:s}'.format(_pipe_name): 1
+                                                     }
+                                                 }
                                                  )
                             }
 
@@ -2003,13 +2415,76 @@ class RoboaoObservation(Observation):
                 traceback.print_exc()
                 return {'status': 'error', 'message': str(_e),
                         'db_record_update': ({'_id': self.id},
-                                             {'$unset': {
-                                                 'pipelined.{:s}'.format(_pipe_name): 1
-                                             }}
+                                             {
+                                                 '$set': {
+                                                     'distributed.status': False,
+                                                     'distributed.location': [],
+                                                     'distributed.last_modified': utc_now()
+                                                 },
+                                                 '$unset': {
+                                                    'pipelined.{:s}'.format(_pipe_name): 1
+                                                 }
+                                             }
                                              )
                         }
 
         return {'status': 'ok', 'message': None}
+
+    def check_aux(self):
+        try:
+            if (self.aux is not None) and ('seeing' in self.aux):
+                if len(self.aux['seeing']['frames']) > 0:
+                    # date_utc, seeing, filter, exposure:
+                    seeing_data = [[s[1], s[3], s[2], s[6]] for s in self.aux['seeing']['frames'] if None not in s]
+                    seeing_data = np.array(seeing_data)
+                    # sort by time stamp:
+                    seeing_data = seeing_data[seeing_data[:, 0].argsort()]
+
+                    seeing_mean = np.mean(seeing_data[:, 1])
+                    seeing_median = np.median(seeing_data[:, 1])
+
+                    # find closest seeing measurement in time:
+                    seeing_nearest_index = np.argmin(np.abs(self.db_entry['date_utc'] - seeing_data[:, 0]))
+
+                    if ((self.db_entry['seeing']['median'] is None) or
+                            (abs(self.db_entry['seeing']['median'] - seeing_median) > 1e-4)) or \
+                            ((self.db_entry['seeing']['mean'] is None) or
+                                 (abs(self.db_entry['seeing']['mean'] - seeing_mean) > 1e-4)) or \
+                            ((self.db_entry['seeing']['nearest'] is None) or
+                            (abs(self.db_entry['seeing']['nearest'][1] - seeing_data[seeing_nearest_index, 1]) > 1e-4)):
+
+                        # DB updates are handled by the main archiver process
+                        # we'll provide it with proper query to feed into pymongo's update_one()
+                        return {'status': 'ok', 'message': 'updated seeing info for {:s}'.format(self.id),
+                                'db_record_update': ({'_id': self.id},
+                                                     {
+                                                         '$set': {
+                                                            'seeing.median': seeing_median,
+                                                            'seeing.mean': seeing_mean,
+                                                            'seeing.nearest': [seeing_data[seeing_nearest_index, 0],
+                                                                               seeing_data[seeing_nearest_index, 1]],
+                                                            'seeing.last_modified': utc_now()
+                                                         }
+                                                     }
+                                                     )
+                                }
+
+            return {'status': 'ok', 'message': None}
+
+        except Exception as _e:
+            traceback.print_exc()
+            return {'status': 'error', 'message': str(_e),
+                    'db_record_update': ({'_id': self.id},
+                                         {
+                                             '$set': {
+                                                 'seeing.median': None,
+                                                 'seeing.mean': None,
+                                                 'seeing.nearest': None,
+                                                 'seeing.last_modified': utc_now()
+                                             }
+                                         }
+                                         )
+                    }
 
     def get_task(self):
         """
@@ -2322,11 +2797,53 @@ class RoboaoObservation(Observation):
 
     def check_distributed(self):
         try:
-            return {'status': 'ok', 'message': None}
+            if not self.db_entry['distributed']['status']:
+                # create a tarball
+                _date = self.db_entry['date_utc'].strftime('%Y%m%d')
+                _path_archive = os.path.join(self.config['path']['path_archive'], _date)
+                _obs = self.id
+
+                pipelines = [_path for _path in os.listdir(os.path.join(_path_archive, _obs))
+                             if os.path.isdir(os.path.join(_path_archive, _obs, _path)) and _path[0] != '.']
+                _p = subprocess.run(
+                    ['tar', '-cf', '{:s}'.format(os.path.join(_path_archive, _obs, '{:s}.tar'.format(_obs))),
+                     '-C', os.path.join(_path_archive, _obs)] + pipelines)
+
+                # compress it:
+                _p = subprocess.run(['lbzip2', '-f', '{:s}'.format(os.path.join(_path_archive,
+                                                                                  _obs, '{:s}.tar'.format(_obs))),
+                                       '--best'])
+
+                return {'status': 'ok', 'message': 'Data compressed, observation marked as distributed.',
+                        'db_record_update': ({'_id': self.id},
+                                             {
+                                                 '$set': {
+                                                     'distributed.status': True,
+                                                     'distributed.location': ['{:s}:{:s}'.format(
+                                                            self.config['server']['analysis_machine_external_host'],
+                                                            self.config['server']['analysis_machine_external_port']),
+                                                            _path_archive],
+                                                     'distributed.last_modified': utc_now()
+                                                 }
+                                             }
+                                             )
+                        }
+            else:
+                return {'status': 'ok', 'message': None}
 
         except Exception as _e:
             traceback.print_exc()
-            return {'status': 'error', 'message': _e}
+            return {'status': 'error', 'message': 'Checking distributed status failed for {:s}'.format(self.id),
+                    'db_record_update': ({'_id': self.id},
+                                         {
+                                             '$set': {
+                                                 'distributed.status': False,
+                                                 'distributed.location': [],
+                                                 'distributed.last_modified': utc_now()
+                                             }
+                                         }
+                                         )
+                    }
 
     def parse(self, _program_pi):
         """
@@ -2625,7 +3142,8 @@ class RoboaoPipeline(Pipeline):
         return x_center, y_center
 
     # @timeout(seconds_before_timeout=10)
-    def load_darks_and_flats(self, _path_calib, _mode, _filt, image_size_x=1024):
+    @staticmethod
+    def load_darks_and_flats(_path_calib, _mode, _filt, image_size_x=1024):
         """
             Load darks and flats
         :param _date:
