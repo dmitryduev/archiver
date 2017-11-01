@@ -1371,29 +1371,19 @@ def query_db(search_form, _coll, _program_ids, _user_id):
     # execute query:
     if len(query) > 0:
         # print('executing query:\n{:s}'.format(query))
-        select = _coll.find(query)
 
-        # TODO: pymongo can take of this!!
-
-        for ob in select:
-            # print('matching:', ob['_id'])
-            # don't transfer everything -- too much stuff, filter out
-            ob_out = dict()
-            for key in ('_id', 'seeing', 'science_program', 'name', 'exposure', 'camera', 'magnitude',
-                        'filter', 'date_utc', 'coordinates', 'distributed'):
-                ob_out[key] = ob[key]
-            ob_out['pipelined'] = dict()
-            for key in ('bright_star', 'faint_star'):
-                ob_out['pipelined'][key] = dict()
-                ob_out['pipelined'][key]['status'] = ob['pipelined'][key]['status']
-                ob_out['pipelined'][key]['preview'] = ob['pipelined'][key]['preview']
-                ob_out['pipelined'][key]['strehl'] = ob['pipelined'][key]['strehl']
-                ob_out['pipelined'][key]['pca'] = dict()
-                ob_out['pipelined'][key]['pca']['status'] = ob['pipelined'][key]['pca']['status']
-                ob_out['pipelined'][key]['pca']['preview'] = ob['pipelined'][key]['pca']['preview']
-
-            # append to output dict
-            obs.append(ob_out)
+        # don't get/transfer everything -- too much stuff, filter out
+        select = _coll.find(query, {'_id': 1, 'seeing': 1, 'science_program': 1, 'name': 1, 'exposure': 1,
+                                    'camera': 1, 'magnitude': 1, 'filter': 1, 'date_utc': 1, 'coordinates': 1,
+                                    'distributed': 1, 'pipelined.bright_star.status': 1,
+                                    'pipelined.bright_star.preview': 1, 'pipelined.bright_star.strehl': 1,
+                                    'pipelined.bright_star.pca.status': 1, 'pipelined.bright_star.pca.preview': 1,
+                                    'pipelined.faint_star.status': 1,
+                                    'pipelined.faint_star.preview': 1, 'pipelined.faint_star.strehl': 1,
+                                    'pipelined.faint_star.pca.status': 1, 'pipelined.faint_star.pca.preview': 1
+                                    })
+        # grab the data
+        obs = list(select)
 
     return obs, errors
 
