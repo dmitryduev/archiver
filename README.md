@@ -41,14 +41,12 @@ For scientific and technical details please refer to
 ## How do I deploy the Archiver?
 
 ### Prerequisites
-* python libraries
-  * flask
-  * huey (a forked version with a few tweaks)
+* python libraries (in addition to what comes with _anaconda_)
+  * flask-login
   * pymongo
   * image_registration (a forked version with a few tweaks)
-  * vip
+  * VIP (a forked version 0.7.5 ported to python 3.6 as of October 2017)
   * lacosmicx 
-  ...
 
 - Install fftw3
 On mac:
@@ -84,6 +82,12 @@ cat files.txt | xargs rm -rf
 Clone the lacosmicx repository:
 ```bash
 git clone https://github.com/cmccully/lacosmicx.git
+```
+Install in a manner similar to `image_registration`
+
+Clone the VIP repository:
+```bash
+https://github.com/dmitryduev/VIP.git
 ```
 Install in a manner similar to `image_registration`
 
