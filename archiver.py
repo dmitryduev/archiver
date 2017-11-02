@@ -2097,7 +2097,10 @@ class RoboaoArchiver(Archiver):
 
         # get calibration file names:
         pattern_fits = r'.fits.bz2\Z'
-        date_seeing = [re.split(pattern_fits, s)[0] for s in _date_raw_data if re.match('seeing_', s) is not None]
+        pattern_end = r'.[0-9]{6}.fits.bz2\Z'
+        date_seeing = [re.split(pattern_fits, s)[0] for s in _date_raw_data
+                       if re.search(pattern_end, s) is not None and
+                       re.match('seeing_', s) is not None]
 
         # for each observation, count number of fits files with data:
         date_seeing_num_fits = [np.count_nonzero([s in df for df in _date_raw_data]) for s in date_seeing]
