@@ -1,2 +1,4 @@
 vip=0.7.5
 photutils>0.3.2
+dask=0.15.4
+distributed=1.19.3

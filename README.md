@@ -47,6 +47,7 @@ For scientific and technical details please refer to
   * image_registration (a forked version with a few tweaks)
   * VIP (a forked version 0.7.5 ported to python 3.6 as of October 2017)
   * lacosmicx 
+  * sewpy
 
 - Install fftw3
 On mac:
@@ -90,11 +91,9 @@ Clone the VIP repository:
 https://github.com/dmitryduev/VIP.git
 ```
 Install in a manner similar to `image_registration`
-
-
-Clone the repository:
+Install _future_ package to make it work in python 3.6:
 ```bash
-git clone https://github.com/dmitryduev/archiver.git
+pip install future
 ```
 
 Compile the bright star pipeline code:
@@ -102,6 +101,25 @@ Compile the bright star pipeline code:
 cd archive/roboao
 # modify Makefile where necessary
 make
+```
+
+Install [SExtractor](https://www.astromatic.net/software/sextractor).
+
+Clone the sewpy repository:
+```bash
+git clone https://github.com/megalut/sewpy
+```
+Install in a manner similar to `image_registration`
+
+Install _pymongo_:
+```bash
+conda install pymongo
+```
+
+
+Clone the Archiver repository:
+```bash
+git clone https://github.com/dmitryduev/archiver.git
 ```
 
 ---
