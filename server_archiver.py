@@ -4,10 +4,6 @@
     Dr Dmitry A. Duev @ Caltech, 2016-2017
 """
 
-# from __future__ import print_function
-# from gevent import monkey
-# monkey.patch_all()
-
 import matplotlib
 matplotlib.use('Agg')
 

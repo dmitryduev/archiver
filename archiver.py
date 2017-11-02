@@ -1,3 +1,9 @@
+"""
+    Archiver
+
+    Dr. Dmitry A. Duev @ Caltech, 2016-2017
+"""
+
 import matplotlib
 matplotlib.use('Agg')
 import argparse
@@ -1018,7 +1024,7 @@ class RoboaoArchiver(Archiver):
                 self.logger.error(_e)
 
             # take a nap
-            time.sleep(3)
+            time.sleep(1.5)
 
     @staticmethod
     def task_runner(argdict_and_hash):

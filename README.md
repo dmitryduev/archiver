@@ -116,6 +116,7 @@ Install _pymongo_:
 conda install pymongo
 ```
 
+Install [_lbzip2_](http://lbzip2.org/).
 
 Clone the Archiver repository:
 ```bash
@@ -280,8 +281,10 @@ mongod --auth --dbpath /Users/dmitryduev/web/mongodb/
 
 **Run the Archiver!** (preferably, in a _tmux_ session)
 ```bash
-tmux
+tmux new -s archiver
 python archiver.py config.json
+# ctrl+b+d -> to detach
+# tmux a -t archiver  -> to attach back 
 ```
 
 ### Data access via the web-server
