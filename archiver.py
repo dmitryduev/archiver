@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import argparse
 import signal
 import psutil
@@ -206,8 +208,8 @@ class Star(object):
         return np.mgrid[int(xmin):int(xmax), int(ymin):int(ymax)]
 
     def plot_resulting_model(self, frame_name):
-        import matplotlib
-        matplotlib.use('Agg')
+        # import matplotlib
+        # matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         """ Make a plot showing data, model and residuals. """
         data = self.data
@@ -2179,8 +2181,8 @@ class RoboaoArchiver(Archiver):
 
                     # generate summary plot for the whole night:
                     if len(seeing_plot) > 0:
-                        import matplotlib
-                        matplotlib.use('Agg')
+                        # import matplotlib
+                        # matplotlib.use('Agg')
                         import matplotlib.pyplot as plt
 
                         seeing_plot = np.array(seeing_plot)
@@ -3472,8 +3474,8 @@ class RoboaoPipeline(Pipeline):
         :param objects: np.array([[x_0,y_0], ..., [x_N,y_N]])
         :return:
         """
-        import matplotlib
-        matplotlib.use('Agg')
+        # import matplotlib
+        # matplotlib.use('Agg')
         from matplotlib.patches import Rectangle
         import matplotlib.pyplot as plt
 
@@ -3978,8 +3980,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
 
         :return:
         """
-        import matplotlib
-        matplotlib.use('Agg')
+        # import matplotlib
+        # matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         _obs = self.db_entry['_id']
 
@@ -4969,8 +4971,8 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
 
         :return:
         """
-        import matplotlib
-        matplotlib.use('Agg')
+        # import matplotlib
+        # matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         _obs = self.db_entry['_id']
 
