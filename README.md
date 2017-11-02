@@ -391,8 +391,6 @@ File naming and descriptions:
 
 ---
 
-## Processing flowcharts
-
 ## Flowcharts
 If you're seeking to understand how things (should) work
 
