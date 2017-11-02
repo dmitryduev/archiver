@@ -699,6 +699,14 @@ class Archiver(object):
         """
         raise NotImplementedError
 
+    def cycle_telemetry(self):
+        """
+            Output basic telemetry when running self.cycle()
+            Specific implementation details are defined in subclass
+        :return:
+        """
+        raise NotImplementedError
+
     @staticmethod
     def task_runner(argdict):
         """
@@ -1827,8 +1835,8 @@ class RoboaoArchiver(Archiver):
                 )
 
                 # output dir exists?
-                if not os.path.exists(os.path.join(_path_out)):
-                    os.makedirs(os.path.join(_path_out))
+                if not os.path.exists(_path_out):
+                    os.makedirs(_path_out)
 
                 # find the combine the darks:
                 for d in dark:

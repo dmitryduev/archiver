@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import aplpy
 import base64
+import shutil
 
 
 class ReverseProxied(object):
@@ -78,6 +79,10 @@ class ReverseProxied(object):
             environ['HTTP_HOST'] = server
 
         return self.app(environ, start_response)
+
+
+def utc_now():
+    return datetime.datetime.now(pytz.utc)
 
 
 def get_filter_code(_filter):
@@ -512,8 +517,8 @@ def get_dates(user_id, coll, coll_aux, start=None, stop=None, max_dates=100):
 
             aux = OrderedDict()
 
-            for key in ('seeing', 'contrast_curve', 'strehl'):
-                if key in date_data and date_data[key]['done']:
+            for key in ('seeing', 'contrast_curve', 'strehl', 'calib'):
+                if key in date_data and (key == 'calib' or date_data[key]['done']):
                     aux[key] = dict()
                     aux[key]['done'] = True if (key in date_data and date_data[key]['done']) else False
                     if key == 'seeing':
@@ -847,6 +852,75 @@ def force_redo():
     except Exception as _e:
         print(_e)
         return flask.jsonify(result={'success': False, 'status': 'failed to enqueue'})
+
+
+@app.route('/_copy_calib')
+@flask_login.login_required
+def copy_calib():
+    """
+        Copy master calibration files for a date
+    :return: jsonified dictionary: result: success or failure
+    """
+    user_id = flask_login.current_user.id
+
+    if user_id != 'admin':
+        # flask.abort(403)
+        return flask.jsonify(result={'success': False, 'status': 'You are not an admin!'})
+
+    # get parameters from the AJAX GET request
+    _date = flask.request.args.get('date', 0, type=str)
+
+    _, _, _, _, _coll_aux, _, _program_pi = get_db(config)
+
+    try:
+
+        _select = _coll_aux.find({'calib.done': True}, {'_id': 1})
+
+        _d0 = datetime.datetime.strptime(_date, '%Y%m%d')
+
+        _dates = []
+        for _doc in _select:
+            _dates.append(datetime.datetime.strptime(_doc['_id'], '%Y%m%d'))
+
+        _dates = np.array(_dates)
+
+        nearest_date = _dates[np.argmin([np.abs((_d - _d0).total_seconds()) for _d in _dates])].strftime('%Y%m%d')
+        # print(nearest_date)
+
+        # make calib dir:
+        _path_out = os.path.join(config['path']['path_archive'], _date, 'calib')
+        # output dir exists?
+        if not os.path.exists(_path_out):
+            os.makedirs(_path_out)
+
+        _path_in = os.path.join(config['path']['path_archive'], nearest_date, 'calib')
+
+        # copy master calib files over:
+        for _f in os.listdir(_path_in):
+            shutil.copy2(os.path.join(_path_in, _f), _path_out)
+
+        # mark calib as done in the DB:
+        _status = _coll_aux.update_one(
+            {'_id': _date},
+            {
+                '$set': {
+                    'calib.done': True,
+                    'calib.last_modified': utc_now(),
+                    'calib.comment': 'Copied from {:s}'.format(nearest_date)
+                }
+            }
+        )
+
+        if _status.matched_count == 1:
+        # if 1:
+            return flask.jsonify(result={'success': True, 'status': 'successfully copied'})
+        # not found in the database?
+        else:
+            return flask.jsonify(result={'success': False, 'status': 'could not find date'})
+
+    except Exception as _e:
+        print(_e)
+        return flask.jsonify(result={'success': False, 'status': 'failed to copy calib data'})
 
 
 @app.route('/_enqueue_lib')

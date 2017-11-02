@@ -218,7 +218,21 @@
                                     {% endif %}
                                         <h4>System performance and meteo data</h4>
                                         {% for aux_key in aux %}
-                                            {% if aux[aux_key]['done'] %}
+                                            {% if (aux_key == 'calib') and (aux[aux_key]['done'] != True) %}
+                                                <div class="col-md-12">
+                                                    <div class="alert alert-warning alert-dismissible fade in" role="alert"
+                                                         id="alert-no-calib-data-{{date}}">
+                                                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                                            <span aria-hidden="true">&times;</span>
+                                                        </button>
+                                                        No calibration data found for {{ date[:4]+'/' + date[4:6]+'/' + date[6:] }}.
+                                                        <button type="button" class="btn btn-primary btn-sm"
+                                                                onclick="copyCalib('{{ date }}');">Copy</button>
+                                                        from nearest date with available calibration data?
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            {% if aux[aux_key]['done'] and aux_key != 'calib' %}
                                                 {# pull seeing data together #}
                                                 {% if aux_key == 'seeing' %}
                                                     <div class="col-md-12">
@@ -548,6 +562,7 @@
 <script src="{{-script_root-}}/static/js/bootstrap-notify.js"></script>
 <script src="{{-script_root-}}/static/js/moment.min.js"></script>
 <script src="{{-script_root-}}/static/js/daterangepicker.js"></script>
+<script src="{{-script_root-}}/static/js/bootbox.js"></script>
 
 <script>
     // for AJAX requests [absolute website's uri]:
@@ -683,6 +698,40 @@ function pauseCarouselHide(date) {
         });
         return false;
     }
+
+    {% if user == 'admin' %}
+    // send AJAX GET request to server to clone calibration data
+    function copyCalib(date) {
+        bootbox.confirm({
+            title: "Copy calibration data?",
+            message: "Do you want to copy calibration data for " + date + "?",
+            buttons: {
+                cancel: {
+                    label: '<i class="fa fa-times"></i> Cancel'
+                },
+                confirm: {
+                    label: '<i class="fa fa-check"></i> Confirm'
+                }
+            },
+            callback: function (result) {
+                // console.log('This was logged in the callback: ' + result);
+                // confirmed? send AJAX request to server:
+                if (result) {
+                    $.getJSON($SCRIPT_ROOT + '/_copy_calib', {
+                        date: date
+                    }, function(status) {
+                        var s = status.result;
+                        if (s['success']) {
+                            // close the alert:
+                            $('#alert-no-calib-data-'+date).alert('close');
+                        }
+                    });
+                }
+            }
+        });
+
+    }
+    {% endif %}
 
     // Build modal with source data on-the-fly
     $('#sourceModal').on('show.bs.modal', function (event) {
