@@ -1,5 +1,6 @@
 import argparse
 import signal
+import psutil
 from collections import OrderedDict
 import pytz
 from distributed import Client, LocalCluster
@@ -699,7 +700,7 @@ class Archiver(object):
         """
         raise NotImplementedError
 
-    def cycle_telemetry(self):
+    def telemetry(self):
         """
             Output basic telemetry when running self.cycle()
             Specific implementation details are defined in subclass
@@ -953,6 +954,11 @@ class RoboaoArchiver(Archiver):
         self.h = threading.Thread(target=self.harvester)
         self.h.start()
 
+        ''' start outputting telemetry in separate thread '''
+        self.start_time = utc_now()
+        self.t = threading.Thread(target=self.telemetry)
+        self.t.start()
+
     def harvester(self):
         """
             Harvest processing results from dask.distributed results queue, update DB entries if necessary
@@ -981,6 +987,34 @@ class RoboaoArchiver(Archiver):
                     self.logger.error(_e)
             # don't need to check that too often
             time.sleep(5)
+
+    def telemetry(self):
+        """
+            Output basic telemetry when running self.cycle()
+            Specific implementation details are defined in subclass
+        :return:
+        """
+        # make sure the archiver is running. this is to protect from frozen thread on (user) exit/crash
+        while self.running:
+            # construct line with telemetry
+            try:
+                # UTC running? start_time #_enqueued_tasks system_CPU_usage_% system_memory_usage_%
+                _r = 'YES' if self.running else 'NO'
+                _start_time = self.start_time.strftime('%Y-%m-%d %H:%M:%S')
+                _n_tasks = len(self.task_hashes)
+                _cpu_usage = psutil.cpu_percent(interval=None)
+                _mem_usage = psutil.virtual_memory().percent
+                _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f}\n'.format(utc_now().strftime('%Y-%m-%d %H:%M:%S'),
+                                                    _r, _start_time, _n_tasks, _cpu_usage, _mem_usage)
+                with open(os.path.join(self.config['path']['path_logs'], 'archiver_status'), 'w') as _f:
+                    _f.write(_t)
+            except Exception as _e:
+                print(_e)
+                traceback.print_exc()
+                self.logger.error(_e)
+
+            # take a nap
+            time.sleep(3)
 
     @staticmethod
     def task_runner(argdict_and_hash):
@@ -1395,7 +1429,7 @@ class RoboaoArchiver(Archiver):
                                         self.update_db_entry(_collection='coll_aux', upd=s['db_record_update'])
                                     raise RuntimeError(s['message'])
                             except Exception as _e:
-                                print(_e)
+                                print('Error in calibration():', _e)
                                 # traceback.print_exc()
                                 self.logger.error(_e)
                                 self.logger.error('Failed to process calibration data for {:s}.'.format(date))
@@ -1808,8 +1842,8 @@ class RoboaoArchiver(Archiver):
 
         # not done or files changed?
         if (not _select['calib']['done']) or \
-                (set(_select['calib']['raw']['flat']) != set(flat)) or \
-                (set(_select['calib']['raw']['dark']) != set(dark)) or \
+                (('flat' in _select['calib']['raw']) and (set(_select['calib']['raw']['flat']) != set(flat))) or \
+                (('dark' in _select['calib']['raw']) and (set(_select['calib']['raw']['dark']) != set(dark))) or \
                 (time_tag - _select['calib']['last_modified']).total_seconds() > 1.0:
             make_calib = True
         else:
