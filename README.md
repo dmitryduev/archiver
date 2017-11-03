@@ -41,16 +41,16 @@ For scientific and technical details please refer to
 ## How do I deploy the Archiver?
 
 ### Prerequisites
-* python libraries (in addition to what comes with _anaconda_)
-  * flask-login
-  * pymongo
-  * image_registration (a forked version with a few tweaks)
-  * VIP (a forked version 0.7.5 ported to python 3.6 as of October 2017)
-  * lacosmicx 
-  * sewpy
-  * APLpy
+* python libraries (in addition to what comes with `anaconda`)
+  * `flask-login`
+  * `pymongo`
+  * `image_registration` (a forked version with a few tweaks)
+  * `VIP` (a forked version 0.7.5 ported to python 3.6 as of October 2017)
+  * `lacosmicx` 
+  * `sewpy`
+  * `APLpy`
 
-- Install fftw3
+- Install `fftw3`
 On mac:
 ```
 brew install fftw
@@ -59,13 +59,13 @@ On Fedora:
 ```
 yum install fftw3
 ```
-- Install pyfftw (also see their github page for details) (use the right pip! (the one from anaconda)):
+- Install `pyfftw` (also see their github page for details) (use the right `pip`! (the one from `anaconda`)):
 ```
 pip install pyfftw
 ```
 - Clone `image_registration` repository from https://github.com/dmitryduev/image_registration.git
- I've made it use pyfftw by default, which is significantly faster than the numpy's fft,
- and quite faster (10-20%) than the fftw3 wrapper used in image_registration by default:
+ I've made it use `pyfftw` by default, which is significantly faster than the `numpy`'s fft,
+ and quite faster (10-20%) than the `fftw3` wrapper used in `image_registration` by default:
 ```
 git clone https://github.com/dmitryduev/image_registration.git
 ```
@@ -74,30 +74,30 @@ git clone https://github.com/dmitryduev/image_registration.git
 cd image_registration
 python setup.py install --record files.txt
 ```
-If it fails on python3 conda env, run the setup command again.
+If it fails on python3 `conda` env, run the setup command again.
 
 - To remove:
 ```
 cat files.txt | xargs rm -rf
 ```
 
-Clone the lacosmicx repository:
+Clone the `lacosmicx` repository:
 ```bash
 git clone https://github.com/cmccully/lacosmicx.git
 ```
 Install in a manner similar to `image_registration`
 
-Clone the VIP repository:
+Clone the `VIP` repository:
 ```bash
 https://github.com/dmitryduev/VIP.git
 ```
 Install in a manner similar to `image_registration`
-Install _future_ package to make it work in python 3.6:
+Install `future` package to make it work in python 3.6:
 ```bash
 pip install future
 ```
 
-Install APLpy:
+Install `APLpy`:
 ```bash
 pip install aplpy
 ```
@@ -111,20 +111,20 @@ make
 
 Install [SExtractor](https://www.astromatic.net/software/sextractor).
 
-Clone the sewpy repository:
+Clone the `sewpy` repository:
 ```bash
 git clone https://github.com/megalut/sewpy
 ```
 Install in a manner similar to `image_registration`
 
-Install _pymongo_:
+Install `pymongo`:
 ```bash
 conda install pymongo
 ```
 
-Install [_lbzip2_](http://lbzip2.org/).
+Install [lbzip2](http://lbzip2.org/).
 
-Clone the Archiver repository:
+Clone the `archiver` repository:
 ```bash
 git clone https://github.com/dmitryduev/archiver.git
 ```
@@ -133,15 +133,15 @@ git clone https://github.com/dmitryduev/archiver.git
 
 ### Configuration file (settings and paths)
 
-* config.json
+* `config.json`
     * Provided as an example
     * modify paths/settings as necessary
 ---
 
 ### Set up and use MongoDB with authentication
-Install MongoDB 3.4
-(yum on Fedora; homebrew on MacOS)
-On Mac OS use ```homebrew```. No need to use root privileges.
+Install `MongoDB` 3.4
+(`yum` on Fedora; `homebrew` on MacOS)
+On Mac OS use `homebrew`. No need to use root privileges.
 ```
 brew install mongodb
 ```
@@ -154,7 +154,7 @@ baseurl=https://repo.mongodb.org/yum/redhat/7/mongodb-org/3.4/x86_64/
 gpgcheck=0
 enabled=1
 ```
- Install with yum:
+ Install with `yum`:
 ```
 yum install -y mongodb-org
 ```
@@ -185,19 +185,19 @@ dbpath: /Users/dmitryduev/web/mongodb/
 ```
 
 **On Mac (on Fedora, will start as a daemon on the next boot)**
-Start mongod without authorization requirement:
+Start `mongod` without authorization requirement:
 ```bash
 mongod --dbpath /Users/dmitryduev/web/mongodb/ 
 ```
 
-If you're running MongoDB on a NUMA machive 
-(connect with the ```mongo``` command and it will tell you if that's the case):
+If you're running `MongoDB` on a NUMA machive 
+(connect with the `mongo` command and it will tell you if that's the case):
 ```bash
 numactl --interleave=all mongod -f /etc/mongod.conf
 ```
 
 
-Connect to mongodb with mongo and create superuser (on Fedora, proceed as root):
+Connect to MongoDB with `mongo` and create superuser (on Fedora, proceed as root):
 ```bash
 # Create your superuser
 $ mongo
@@ -209,7 +209,7 @@ $ mongo
         roles: [{role: "userAdminAnyDatabase", db: "admin"}]})
 > exit 
 ```
-Connect to mongodb (now not necessary as root)
+Connect to MongoDB (now not necessary as root)
 ```bash
 mongo -u "admin" -p "yoursecretpassword" --authenticationDatabase "admin" 
 ```
@@ -241,7 +241,7 @@ To run the database manually (i.e. not as a service):
 ```bash
 mongod --auth --dbpath /Users/dmitryduev/web/mongodb/
 ```
-Connect to database from pymongo:
+Connect to database from `pymongo`:
 ```python
 from pymongo import MongoClient
 client = MongoClient('ip_address_or_uri')
@@ -252,7 +252,7 @@ db['some_collection'].find_one()
 ```
 #### Add admin user for data access on the website
 
-Connect to database from pymongo and do an insertion:
+Connect to database from `pymongo` and do an insertion:
 ```python
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash
@@ -328,12 +328,12 @@ db.getCollection('objects').update({},
 )
 ```
 
-Force faint pipeline on a target:
+Force faint_star pipeline on a target:
 ```bash
 db.getCollection('objects').update_one({'_id': '4_351_Yrsa_VIC_lp600_o_20160925_110427.040912'}, 
     { $set: 
-        {'pipelined.faint.status.force_redo': True,
-         'pipelined.faint.last_modified': utc_now()}
+        {'pipelined.faint_star.status.force_redo': True,
+         'pipelined.faint_star.last_modified': utc_now()}
     }
 )
 ```
