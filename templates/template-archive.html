@@ -160,10 +160,10 @@
                                             <h4>Program {{ program }}</h4>
                                             <div id="program_{{program}}_images">
                                             {% for obs in programs[program] %}
-                                                {% if (bright_star in obs['pipelined'] and
+                                                {% if ('bright_star' in obs['pipelined'] and
                                                         obs['pipelined']['bright_star']['status']['done'] and
                                                         obs['pipelined']['bright_star']['classified_as'] != 'failed') or
-                                                        (faint_star in obs['pipelined'] and
+                                                        ('faint_star' in obs['pipelined'] and
                                                             obs['pipelined']['faint_star']['status']['done']) %}
                                                     <div class="img-wrapper">
                                                         {% if obs['pipelined']['bright_star']['status']['done'] %}
