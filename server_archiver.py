@@ -15,6 +15,7 @@ import datetime
 import pytz
 import argparse
 import sys
+import subprocess
 import inspect
 from collections import OrderedDict
 import flask
@@ -896,7 +897,15 @@ def copy_calib():
             shutil.copy2(os.path.join(_path_in, _f), _path_out)
 
         # rsync archive and analysis machines
-
+        if config['server']['environment'] == 'production':
+            try:
+                subprocess.run(["/usr/local/bin/rsync", "-av", "-e", "'ssh -p 22220'",
+                                _path_out + '/', "roboao@140.252.53.120:/Data1/archive/{:s}/calib/".format(_date),
+                                ">/dev/null", "2>&1"])
+            except Exception as _e:
+                print(_e)
+                return flask.jsonify(result={'success': False,
+                                             'status': 'could not rsync analysis and archive machines'})
 
         # mark calib as done in the DB:
         _status = _coll_aux.update_one(

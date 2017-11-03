@@ -1010,7 +1010,7 @@ class RoboaoArchiver(Archiver):
                 _n_tasks = len(self.task_hashes)
                 _cpu_usage = psutil.cpu_percent(interval=None)
                 _mem_usage = psutil.virtual_memory().percent
-                _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f}\n'.format(utc_now().strftime('%Y-%m-%d %H:%M:%S'),
+                _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f}\n'.format(utc_now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
                                                     _r, _start_time, _n_tasks, _cpu_usage, _mem_usage)
                 with open(os.path.join(self.config['path']['path_logs'], 'archiver_status'), 'w') as _f:
                     _f.write(_t)
