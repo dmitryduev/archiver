@@ -298,7 +298,7 @@ python archiver.py config.json
 Make sure to install python dependencies:
 ```
 git clone https://github.com/pyvirtobs/pyvo.git
-cd pyvo && /path/to/python setup.py install
+cd pyvo && /path/to/python setup.py install --record files.txt
 conda install flask-login
 ```
 

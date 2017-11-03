@@ -160,15 +160,17 @@
                                             <h4>Program {{ program }}</h4>
                                             <div id="program_{{program}}_images">
                                             {% for obs in programs[program] %}
-                                                {% if (obs['pipelined']['bright_star']['status']['done'] and
+                                                {% if (bright_star in obs['pipelined'] and
+                                                        obs['pipelined']['bright_star']['status']['done'] and
                                                         obs['pipelined']['bright_star']['classified_as'] != 'failed') or
-                                                        obs['pipelined']['faint_star']['status']['done'] %}
+                                                        (faint_star in obs['pipelined'] and
+                                                            obs['pipelined']['faint_star']['status']['done']) %}
                                                     <div class="img-wrapper">
                                                         {% if obs['pipelined']['bright_star']['status']['done'] %}
                                                             <img src="{{-script_root-}}/data/{{date}}/{{obs['_id']}}/bright_star/preview/{{obs['_id']}}_cropped.png"
                                                                  alt="{{ obs['_id'] }}"
                                                                  style="height:120px; cursor: pointer; margin-bottom: 3px;">
-                                                        {% elif obs['pipelined']['faint_star']['status']['done'] %}
+                                                        {% elif 'faint_star' in obs['pipelined'] and obs['pipelined']['faint_star']['status']['done'] %}
                                                             <img src="{{-script_root-}}/data/{{date}}/{{obs['_id']}}/faint_star/preview/{{obs['_id']}}_cropped.png"
                                                                  alt="{{ obs['_id'] }}"
                                                                  style="height:120px; cursor: pointer;">
@@ -176,12 +178,12 @@
                                                         <div class="overlay" data-toggle="modal" data-target="#sourceModal"
                                                              data-date="{{date}}" data-source="{{ obs['_id'] }}"
                                                              data-sou_name="{{ obs['name'] }}"
-                                                             data-lucky="{{ obs['pipelined']['bright_star']['preview']['done'] }}"
-                                                             data-lucky-strehl="{{ obs['pipelined']['bright_star']['strehl']['status']['done'] }}"
-                                                             data-lucky-pca="{{ obs['pipelined']['bright_star']['pca']['preview']['done'] }}"
-                                                             data-faint="{{ obs['pipelined']['faint_star']['preview']['done'] }}"
-                                                             data-faint-strehl="{{ obs['pipelined']['faint_star']['strehl']['status']['done'] }}"
-                                                             data-faint-pca="{{ obs['pipelined']['faint_star']['pca']['preview']['done'] }}"
+                                                             data-lucky="{{ obs['pipelined']['bright_star']['preview']['done'] if 'bright_star' in obs['pipelined'] else False}}"
+                                                             data-lucky-strehl="{{ obs['pipelined']['bright_star']['strehl']['status']['done'] if 'bright_star' in obs['pipelined'] else False}}"
+                                                             data-lucky-pca="{{ obs['pipelined']['bright_star']['pca']['preview']['done'] if 'bright_star' in obs['pipelined'] else False}}"
+                                                             data-faint="{{ obs['pipelined']['faint_star']['preview']['done'] if 'faint_star' in obs['pipelined'] else False}}"
+                                                             data-faint-strehl="{{ obs['pipelined']['faint_star']['strehl']['status']['done'] if 'faint_star' in obs['pipelined'] else False}}"
+                                                             data-faint-pca="{{ obs['pipelined']['faint_star']['pca']['preview']['done'] if 'faint_star' in obs['pipelined'] else False}}"
                                                              style="cursor: pointer;">
                                                              {{obs['name']}}<br>
                                                              Camera: {{obs['camera']}}<br>
