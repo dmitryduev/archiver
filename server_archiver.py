@@ -301,8 +301,8 @@ if env != 'production':
     config_file = args.config_file
 else:
     # FIXME:
-    # config_file = 'config.archive.json'
-    config_file = 'config.json'
+    config_file = 'config.archive.json'
+    # config_file = 'config.json'
     # config_file = 'config.analysis.json'
 
 
@@ -894,6 +894,9 @@ def copy_calib():
         # copy master calib files over:
         for _f in os.listdir(_path_in):
             shutil.copy2(os.path.join(_path_in, _f), _path_out)
+
+        # rsync archive and analysis machines
+
 
         # mark calib as done in the DB:
         _status = _coll_aux.update_one(

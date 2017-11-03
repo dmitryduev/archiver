@@ -48,6 +48,7 @@ For scientific and technical details please refer to
   * VIP (a forked version 0.7.5 ported to python 3.6 as of October 2017)
   * lacosmicx 
   * sewpy
+  * APLpy
 
 - Install fftw3
 On mac:
@@ -94,6 +95,11 @@ Install in a manner similar to `image_registration`
 Install _future_ package to make it work in python 3.6:
 ```bash
 pip install future
+```
+
+Install APLpy:
+```bash
+pip install aplpy
 ```
 
 Compile the bright star pipeline code:

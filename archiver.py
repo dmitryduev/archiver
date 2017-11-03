@@ -934,10 +934,10 @@ class Archiver(object):
         :return:
         """
         sleep_for = self.naptime()  # seconds
-        # sleeping for longer than 10 minutes?
-        if sleep_for > 10*60:
-            self.logger.debug('Will disconnect from DB not to keep connection idle.')
-            self.disconnect_from_db()
+        # # sleeping for longer than 10 minutes?
+        # if sleep_for > 10*60:
+        #     self.logger.debug('Will disconnect from DB not to keep connection idle.')
+        #     self.disconnect_from_db()
         self.logger.debug('Falling asleep for {:.1f} minutes.'.format(sleep_for / 60.0))
         time.sleep(sleep_for)
 
