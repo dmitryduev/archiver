@@ -302,10 +302,14 @@ cd pyvo && /path/to/python setup.py install
 conda install flask-login
 ```
 
-Run the data access web-server using the pm2 process manager:
+Test the data access web interface:
 ```bash
-pm2 start server_data_archive.py --interpreter=/path/to/python -- path/to/config.ini
+/path/to/python server_data_archive.py /path/to/config.json
 ```
+
+#### Production deployment with supervisord/gunicorn
+The procedure is explained in detail in 
+[server_setup.md](https://github.com/dmitryduev/archiver/blob/master/doc/server_setup.md).
 
 #### A short tutorial on how to use the web interface
     TODO
