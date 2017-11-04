@@ -232,13 +232,13 @@
                     <tr class="clickable-row">
                     <td>{{ usr }}</td>
                     <td>
-                        {{ users[usr]['programs'][2:-1] | join(', ') }}
+                        {{ users[usr]['programs'] | join(', ') }}
                     </td>
                     <td>
                         <button type="button" class="btn btn-xs btn-primary editButton"
                                 data-toggle="modal" data-target="#editUserModal"
                                 data-user="{{ usr }}"
-                                data-programs="{{ users[usr]['programs'][2:-1] | join(', ') }}">
+                                data-programs="{{ users[usr]['programs'] | join(', ') }}">
                         edit</button>
                         <button type="button" class="btn btn-xs btn-danger removeButton"
                                 data-user="{{ usr }}">
