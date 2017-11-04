@@ -1492,7 +1492,7 @@ def manage_users():
             if usr['programs'] == 'all':
                 _users[usr['_id']] = {'programs': ['all']}
             else:
-                _users[usr['_id']] = {'programs': [p.encode('ascii', 'ignore')[2:-1]
+                _users[usr['_id']] = {'programs': [p.encode('ascii', 'ignore')
                                                    for p in usr['programs']]}
 
         return flask.render_template('template-users.html',
