@@ -899,12 +899,17 @@ def copy_calib():
         # rsync archive and analysis machines
         if config['server']['environment'] == 'production':
             try:
+                # FIXME: come up with a better way to do this:
                 # make remote dir:
                 subprocess.run(["ssh", "-p 22220", "roboao@140.252.53.120",
                                 "mkdir -p /Data1/archive/{:s}/calib".format(_date)])
-                subprocess.run(["/usr/local/bin/rsync", "-av",
-                                _path_out + '/',
-                                "-e 'ssh -p 22220' roboao@140.252.53.120:/Data1/archive/{:s}/calib/".format(_date)])
+                # copy stuff over:
+                subprocess.run(["ssh", "-p 22220", "roboao@140.252.53.120",
+                                "cp /Data1/archive/{:s}/calib/* /Data1/archive/{:s}/calib/".format(nearest_date,
+                                                                                                   _date)])
+                # subprocess.run(["/usr/local/bin/rsync", "-av",
+                #                 _path_out + '/',
+                #                 "-e 'ssh -p 22220' roboao@140.252.53.120:/Data1/archive/{:s}/calib/".format(_date)])
             except Exception as _e:
                 print(_e)
                 return flask.jsonify(result={'success': False,
