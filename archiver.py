@@ -987,6 +987,9 @@ class RoboaoArchiver(Archiver):
                     # remove from self.task_hashes
                     if result['status'] == 'ok' and 'hash' in result:
                         self.task_hashes.remove(result['hash'])
+                    # error? remove from self.task_hashes. max_retries won't allow it to come back too many times!
+                    elif result['status'] == 'error' and 'hash' in result:
+                        self.task_hashes.remove(result['hash'])
                 except Exception as _e:
                     print(_e)
                     traceback.print_exc()
@@ -2003,7 +2006,7 @@ class RoboaoArchiver(Archiver):
             # number of frames in each fits file
             n_frames_files = []
             for jj, _file in enumerate(_seeing_frames):
-                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file))) as _hdulist:
+                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file)), memmap=True) as _hdulist:
                     if jj == 0:
                         # get image size (this would be (1024, 1024) for the Andor camera)
                         image_size = _hdulist[0].shape
@@ -2016,7 +2019,7 @@ class RoboaoArchiver(Archiver):
             summed_seeing_limited_frame = np.zeros(image_size, dtype=np.float)
             for jj, _file in enumerate(_seeing_frames):
                 # print(jj)
-                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file))) as _hdulist:
+                with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file)), memmap=True) as _hdulist:
                     for ii, _ in enumerate(_hdulist):
                         summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
 
@@ -5106,7 +5109,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             summed_seeing_limited_frame = np.zeros((image_size[0], image_size[1]), dtype=np.float)
             for jj, _file in enumerate(raws):
                 # print(jj)
-                with fits.open(_file) as _hdulist:
+                with fits.open(_file, memmap=True) as _hdulist:
                     # frames_before = sum(n_frames_files[:jj])
                     for ii, _ in enumerate(_hdulist):
                         summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
@@ -5154,7 +5157,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                 print('using seeing-limited image as pivot frame')
             else:
                 try:
-                    with fits.open(raws[pivot[0]]) as _hdulist:
+                    with fits.open(raws[pivot[0]], memmap=True) as _hdulist:
                         im1 = np.array(np.nan_to_num(_hdulist[pivot[1]].data), dtype=np.float)
                     print('using frame {:d} from raw fits-file #{:d} as pivot frame'.format(*pivot[::-1]))
                 except Exception as _e:
