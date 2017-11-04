@@ -735,7 +735,58 @@
                                                 {% endif %}
                                             </td>
                                             {% for key in ('bright_star', 'faint_star')%}
-                                                {% if key in object['pipelined'] %}
+                                                {% if key not in object['pipelined'] %}
+                                                    {% set class_pipe = 'danger' %}
+                                                    {% set class_pipe_pca = 'danger' %}
+                                                    {# pipelined? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' and key == 'faint_star' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}');">
+                                                        {% endif %}
+                                                        <span class="label label-{{ class_pipe }}" id="{{ object['_id'] }}_{{ key }}">
+                                                            False
+                                                        </span>
+                                                        {% if user == 'admin' %}
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
+                                                    {# pca pipeline done? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.pca');">
+                                                        {% endif %}
+                                                        <span class="label label-{{ class_pipe_pca }}" id="{{ object['_id'] }}_{{ key }}.pca">
+                                                            False
+                                                        </span>
+                                                        {% if user == 'admin' %}
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
+                                                    {# Strehl computed? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.strehl');">
+                                                        {% endif %}
+                                                            <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                None
+                                                            </span>
+                                                        {% if user == 'admin' %}
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
+                                                    {# Strehl labled? #}
+                                                    <td>
+                                                        <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                            None
+                                                        </span>
+                                                    </td>
+                                                {% else %}
                                                     {# set up classes for color-coding the badges #}
                                                     {% set class_pipe = 'success' if
                                                     object['pipelined'][key]['status']['done'] else 'danger' %}
