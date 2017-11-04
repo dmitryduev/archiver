@@ -1181,9 +1181,9 @@ class RoboaoArchiver(Archiver):
                 for v in _progs:
                     # multiple users could have access to the same program, that's totally fine!
                     if str(v) not in _program_pi:
-                        _program_pi[str(v)] = [doc['_id'].encode('ascii', 'ignore')]
+                        _program_pi[str(v)] = [doc['_id']]
                     else:
-                        _program_pi[str(v)].append(doc['_id'].encode('ascii', 'ignore'))
+                        _program_pi[str(v)].append(doc['_id'])
                         # print(program_pi)
         except Exception as _e:
             _program_pi = {}
@@ -2921,7 +2921,7 @@ class RoboaoObservation(Observation):
         _prog_num = str(_tmp[0])
         # who's pi?
         if (_program_pi is not None) and (_prog_num in _program_pi.keys()):
-            _prog_pi = _program_pi[_prog_num]
+            _prog_pi = str(_program_pi[_prog_num])
         else:
             # play safe if pi's unknown:
             _prog_pi = ['admin']

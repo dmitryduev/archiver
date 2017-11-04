@@ -1492,8 +1492,7 @@ def manage_users():
             if usr['programs'] == 'all':
                 _users[usr['_id']] = {'programs': ['all']}
             else:
-                _users[usr['_id']] = {'programs': [p
-                                                   for p in usr['programs']]}
+                _users[usr['_id']] = {'programs': [p for p in usr['programs']]}
 
         return flask.render_template('template-users.html',
                                      user=flask_login.current_user.id,
