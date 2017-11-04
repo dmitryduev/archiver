@@ -1849,6 +1849,11 @@ class RoboaoArchiver(Archiver):
         # check folder modified date:
         time_tag = mdate_walk(_path_out)
 
+        # calib data copied from other date?
+        if _select['calib']['done'] and ('comment' in _select['calib']) and \
+                ('Copied from' in _select['calib']['comment']):
+            return {'status': 'ok', 'message': None}
+
         # not done or files changed?
         if (not _select['calib']['done']) or \
                 (('flat' in _select['calib']['raw']) and (set(_select['calib']['raw']['flat']) != set(flat))) or \
