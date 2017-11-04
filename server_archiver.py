@@ -899,9 +899,9 @@ def copy_calib():
         # rsync archive and analysis machines
         if config['server']['environment'] == 'production':
             try:
-                subprocess.run(["/usr/local/bin/rsync", "-av", "-e", "'ssh -p 22220'",
-                                _path_out + '/', "roboao@140.252.53.120:/Data1/archive/{:s}/calib/".format(_date),
-                                ">/dev/null", "2>&1"])
+                subprocess.run(["/usr/local/bin/rsync", "-av",
+                                _path_out + '/',
+                                "-e 'ssh -p 22220' roboao@140.252.53.120:/Data1/archive/{:s}/calib/".format(_date)])
             except Exception as _e:
                 print(_e)
                 return flask.jsonify(result={'success': False,
