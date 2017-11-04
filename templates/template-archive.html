@@ -220,7 +220,7 @@
                                     {% endif %}
                                         <h4>System performance and meteo data</h4>
                                         {% for aux_key in aux %}
-                                            {% if (aux_key == 'calib') and (aux[aux_key]['done'] != True) %}
+                                            {% if (user == 'admin') and (aux_key == 'calib') and (aux[aux_key]['done'] != True) %}
                                                 <div class="col-md-12">
                                                     <div class="alert alert-warning alert-dismissible fade in" role="alert"
                                                          id="alert-no-calib-data-{{date}}">

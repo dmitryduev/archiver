@@ -735,113 +735,115 @@
                                                 {% endif %}
                                             </td>
                                             {% for key in ('bright_star', 'faint_star')%}
-                                                {# set up classes for color-coding the badges #}
-                                                {% set class_pipe = 'success' if
-                                                object['pipelined'][key]['status']['done'] else 'danger' %}
-                                                {# being recomputed? #}
-                                                {% if key == 'faint_star' and (object['pipelined'][key]['status']['force_redo']
-                                                or object['pipelined'][key]['status']['enqueued']) %}
-                                                    {% set class_pipe = 'warning' %}
-                                                {% endif %}
-                                                {% set class_pipe_pca = 'success' if
-                                                object['pipelined'][key]['pca']['status']['done'] else 'danger' %}
-                                                {# being recomputed? #}
-                                                {% if object['pipelined'][key]['pca']['status']['force_redo']
-                                                or object['pipelined'][key]['pca']['status']['enqueued'] %}
-                                                    {% set class_pipe_pca = 'warning' %}
-                                                {% endif %}
+                                                {% if key in object['pipelined'] %}
+                                                    {# set up classes for color-coding the badges #}
+                                                    {% set class_pipe = 'success' if
+                                                    object['pipelined'][key]['status']['done'] else 'danger' %}
+                                                    {# being recomputed? #}
+                                                    {% if key == 'faint_star' and (object['pipelined'][key]['status']['force_redo']
+                                                    or object['pipelined'][key]['status']['enqueued']) %}
+                                                        {% set class_pipe = 'warning' %}
+                                                    {% endif %}
+                                                    {% set class_pipe_pca = 'success' if
+                                                    object['pipelined'][key]['pca']['status']['done'] else 'danger' %}
+                                                    {# being recomputed? #}
+                                                    {% if object['pipelined'][key]['pca']['status']['force_redo']
+                                                    or object['pipelined'][key]['pca']['status']['enqueued'] %}
+                                                        {% set class_pipe_pca = 'warning' %}
+                                                    {% endif %}
 
-                                                {# pipelined? #}
-                                                <td>
-                                                    {# jedi master can use force to force redo! #}
-                                                    {% if user == 'admin' and key == 'faint_star' %}
-                                                        <span style="cursor: pointer;"
-                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}');">
-                                                    {% endif %}
-                                                    <span class="label label-{{ class_pipe }}" id="{{ object['_id'] }}_{{ key }}">
-                                                        {{ object['pipelined'][key]['status']['done'] }}
-                                                    </span>
-                                                    {% if user == 'admin' %}
+                                                    {# pipelined? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' and key == 'faint_star' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}');">
+                                                        {% endif %}
+                                                        <span class="label label-{{ class_pipe }}" id="{{ object['_id'] }}_{{ key }}">
+                                                            {{ object['pipelined'][key]['status']['done'] }}
                                                         </span>
-                                                    {% endif %}
-                                                </td>
-                                                {# pca pipeline done? #}
-                                                <td>
-                                                    {# jedi master can use force to force redo! #}
-                                                    {% if user == 'admin' %}
-                                                        <span style="cursor: pointer;"
-                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.pca');">
-                                                    {% endif %}
-                                                    <span class="label label-{{ class_pipe_pca }}" id="{{ object['_id'] }}_{{ key }}.pca">
-                                                        {{ object['pipelined'][key]['pca']['status']['done'] }}
-                                                    </span>
-                                                    {% if user == 'admin' %}
-                                                        </span>
-                                                    {% endif %}
-                                                </td>
-                                                {# Strehl computed? #}
-                                                <td>
-                                                    {# jedi master can use force to force redo! #}
-                                                    {% if user == 'admin' %}
-                                                        <span style="cursor: pointer;"
-                                                              onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.strehl');">
-                                                    {% endif %}
-                                                    {% if object['pipelined'][key]['strehl']['ratio_percent'] != None %}
-                                                        {# being recomputed? #}
-                                                        {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
-                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
-                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
-                                                                {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
-                                                            </span>
-                                                        {% else %}
-                                                            <span  id="{{ object['_id'] }}_{{ key }}.strehl">
-                                                                {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
+                                                        {% if user == 'admin' %}
                                                             </span>
                                                         {% endif %}
-                                                    {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
-                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
-                                                        <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
-                                                            None
+                                                    </td>
+                                                    {# pca pipeline done? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.pca');">
+                                                        {% endif %}
+                                                        <span class="label label-{{ class_pipe_pca }}" id="{{ object['_id'] }}_{{ key }}.pca">
+                                                            {{ object['pipelined'][key]['pca']['status']['done'] }}
                                                         </span>
-                                                    {% else %}
-                                                        <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl">
-                                                            None
-                                                        </span>
-                                                    {% endif %}
-                                                    {% if user == 'admin' %}
-                                                        </span>
-                                                    {% endif %}
-                                                </td>
-                                                {# Strehl labled? #}
-                                                <td>
-                                                    {% if object['pipelined'][key]['strehl']['flag'] != None %}
-                                                        {# being recomputed? #}
-                                                        {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
-                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
-                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
-                                                                {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                        {% if user == 'admin' %}
                                                             </span>
-                                                        {% else %}
-                                                            {% if object['pipelined'][key]['strehl']['flag'] == 'OK' %}
-                                                                <span class="label label-success" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
-                                                                    {{ object['pipelined'][key]['strehl']['flag'] }}
-                                                            {% elif object['pipelined'][key]['strehl']['flag'] == 'BAD?' %}
-                                                                <span class="label label-danger" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
-                                                                    {{ object['pipelined'][key]['strehl']['flag'] }}
-                                                            {% endif %}
+                                                        {% endif %}
+                                                    </td>
+                                                    {# Strehl computed? #}
+                                                    <td>
+                                                        {# jedi master can use force to force redo! #}
+                                                        {% if user == 'admin' %}
+                                                            <span style="cursor: pointer;"
+                                                                  onclick="forceRedo('{{ object['_id'] }}', '{{ key }}.strehl');">
+                                                        {% endif %}
+                                                        {% if object['pipelined'][key]['strehl']['ratio_percent'] != None %}
+                                                            {# being recomputed? #}
+                                                            {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                                object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                                <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                    {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
                                                                 </span>
+                                                            {% else %}
+                                                                <span  id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                    {{ '%.2f' | format(object['pipelined'][key]['strehl']['ratio_percent']) }}
+                                                                </span>
+                                                            {% endif %}
+                                                        {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                                object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                None
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl">
+                                                                None
+                                                            </span>
                                                         {% endif %}
-                                                    {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
-                                                            object['pipelined'][key]['strehl']['status']['enqueued'] %}
-                                                        <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
-                                                            None
-                                                        </span>
-                                                    {% else %}
-                                                        <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
-                                                            None
-                                                        </span>
-                                                    {% endif %}
-                                                </td>
+                                                        {% if user == 'admin' %}
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
+                                                    {# Strehl labled? #}
+                                                    <td>
+                                                        {% if object['pipelined'][key]['strehl']['flag'] != None %}
+                                                            {# being recomputed? #}
+                                                            {% if object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                                object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                                <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                    {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                                </span>
+                                                            {% else %}
+                                                                {% if object['pipelined'][key]['strehl']['flag'] == 'OK' %}
+                                                                    <span class="label label-success" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                        {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                                {% elif object['pipelined'][key]['strehl']['flag'] == 'BAD?' %}
+                                                                    <span class="label label-danger" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                        {{ object['pipelined'][key]['strehl']['flag'] }}
+                                                                {% endif %}
+                                                                    </span>
+                                                            {% endif %}
+                                                        {% elif object['pipelined'][key]['strehl']['status']['force_redo'] or
+                                                                object['pipelined'][key]['strehl']['status']['enqueued'] %}
+                                                            <span class="label label-warning" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                None
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="label label-default" id="{{ object['_id'] }}_{{ key }}.strehl.flag">
+                                                                None
+                                                            </span>
+                                                        {% endif %}
+                                                    </td>
+                                                {% endif %}
                                             {% endfor %}
                                             {# obs distributed? #}
                                             <td>
@@ -854,8 +856,10 @@
                                             </td>
                                             {# display modal with preview stuff #}
                                             <td>
-                                                {% if object['pipelined']['bright_star']['status']['done'] or
-                                                        object['pipelined']['faint_star']['status']['done'] %}
+                                                {% if ('bright_star' in object['pipelined'] and
+                                                object['pipelined']['bright_star']['status']['done']) or
+                                                    ('faint_star' in object['pipelined'] and
+                                                        object['pipelined']['faint_star']['status']['done']) %}
                                                     <a href="#" data-toggle="modal" data-target="#sourceModal"
                                                        data-date="{{object['date_utc'].strftime('%Y%m%d')}}"
                                                        data-source="{{ object['_id'] }}"
@@ -896,9 +900,11 @@
                                 {# previews in the flesh #}
                                 <div id="preview_images" style="margin-top: 10px;">
                                     {% for object in obs %}
-                                        {% if (object['pipelined']['bright_star']['status']['done'] and
-                                                object['pipelined']['bright_star']['classified_as'] != 'failed') or
-                                                object['pipelined']['faint_star']['status']['done'] %}
+                                        {% if ('bright_star' in object['pipelined'] and
+                                               object['pipelined']['bright_star']['status']['done'] and
+                                               object['pipelined']['bright_star']['classified_as'] != 'failed') or
+                                                ('faint_star' in object['pipelined'] and
+                                                 object['pipelined']['faint_star']['status']['done']) %}
                                             {% set date = object['date_utc'].strftime('%Y%m%d') %}
                                             <div class="img-wrapper">
                                                 {% if object['pipelined']['bright_star']['status']['done'] %}
@@ -934,7 +940,8 @@
                                     <br>
                                     <p style="margin-top: 10px;">
                                     {% for object in obs %}
-                                        {% if object['pipelined']['bright_star']['status']['done'] and
+                                        {% if 'bright_star' in object['pipelined'] and
+                                            object['pipelined']['bright_star']['status']['done'] and
                                                 object['pipelined']['bright_star']['classified_as'] == 'failed' %}
                                             {{ object['_id'] }}: failed<br>
                                         {% endif %}
