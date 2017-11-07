@@ -915,12 +915,12 @@
                                                        data-date="{{object['date_utc'].strftime('%Y%m%d')}}"
                                                        data-source="{{ object['_id'] }}"
                                                        data-sou_name="{{ object['name'] }}"
-                                                       data-lucky="{{ obs['pipelined']['bright_star']['preview']['done'] if 'bright_star' in obs['pipelined'] else False}}"
-                                                             data-lucky-strehl="{{ obs['pipelined']['bright_star']['strehl']['status']['done'] if 'bright_star' in obs['pipelined'] else False}}"
-                                                             data-lucky-pca="{{ obs['pipelined']['bright_star']['pca']['preview']['done'] if 'bright_star' in obs['pipelined'] else False}}"
-                                                             data-faint="{{ obs['pipelined']['faint_star']['preview']['done'] if 'faint_star' in obs['pipelined'] else False}}"
-                                                             data-faint-strehl="{{ obs['pipelined']['faint_star']['strehl']['status']['done'] if 'faint_star' in obs['pipelined'] else False}}"
-                                                             data-faint-pca="{{ obs['pipelined']['faint_star']['pca']['preview']['done'] if 'faint_star' in obs['pipelined'] else False}}">
+                                                       data-lucky="{{ object['pipelined']['bright_star']['preview']['done'] if 'bright_star' in object['pipelined'] else False}}"
+                                                         data-lucky-strehl="{{ object['pipelined']['bright_star']['strehl']['status']['done'] if 'bright_star' in object['pipelined'] else False}}"
+                                                         data-lucky-pca="{{ object['pipelined']['bright_star']['pca']['preview']['done'] if 'bright_star' in object['pipelined'] else False}}"
+                                                         data-faint="{{ object['pipelined']['faint_star']['preview']['done'] if 'faint_star' in object['pipelined'] else False}}"
+                                                         data-faint-strehl="{{ object['pipelined']['faint_star']['strehl']['status']['done'] if 'faint_star' in object['pipelined'] else False}}"
+                                                         data-faint-pca="{{ object['pipelined']['faint_star']['pca']['preview']['done'] if 'faint_star' in object['pipelined'] else False}}">
                                                     <span class="glyphicon glyphicon-play-circle" style="font-size: 11px"></span></a>
                                                 {% else %}
                                                     <span class="label label-default">None</span>
