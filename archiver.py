@@ -443,7 +443,7 @@ def lbunzip2(_path_in, _files, _path_out, _cmd='lbunzip2', _keep=True, _rewrite=
         # copy zipped to tmp dir:
         shutil.copy2(file_in, _path_out)
         # bz2.decompress and remove copied original
-        subprocess.run([_cmd, os.path.join(_path_out, file_in)])
+        subprocess.run([_cmd, os.path.join(_path_out, _file)])
 
         # remove the original if requested:
         if not _keep:
