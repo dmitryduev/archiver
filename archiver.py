@@ -672,13 +672,13 @@ class Archiver(object):
             # now we need to map our queue over task_runner and gather results in another queue.
             # user must setup specific tasks/jobs in task_runner, which (unfortunately)
             # cannot be defined inside a subclass -- only as a standalone function
-            # self.futures = self.c.map(self.task_runner, self.q,
-            #                           maxsize=self.config['parallel']['n_workers']*
-            #                                   self.config['parallel']['threads_per_worker'])
-            # self.results = self.c.gather(self.futures, maxsize=self.config['parallel']['n_workers']*
-            #                              self.config['parallel']['threads_per_worker'])  # Gather results
-            self.futures = self.c.map(self.task_runner, self.q)
-            self.results = self.c.gather(self.futures)  # Gather results
+            self.futures = self.c.map(self.task_runner, self.q,
+                                      maxsize=self.config['parallel']['n_workers']*
+                                              self.config['parallel']['threads_per_worker'])
+            self.results = self.c.gather(self.futures, maxsize=self.config['parallel']['n_workers']*
+                                         self.config['parallel']['threads_per_worker'])  # Gather results
+            # self.futures = self.c.map(self.task_runner, self.q)
+            # self.results = self.c.gather(self.futures)  # Gather results
 
             self.logger.debug('Successfully set up dask.distributed cluster')
 
