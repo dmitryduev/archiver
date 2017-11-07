@@ -389,7 +389,7 @@ def rho(x, y, x_0=1024, y_0=1024):
     return np.sqrt((x-x_0)**2 + (y-y_0)**2)
 
 
-def lbunzip2(_path_in, _files, _path_out, _cmd='bunzip2', _keep=True, _rewrite=True, _v=False):
+def lbunzip2(_path_in, _files, _path_out, _cmd='lbunzip2', _keep=True, _rewrite=True, _v=False):
 
     """
         A wrapper around lbunzip2 - a parallel version of bunzip2
