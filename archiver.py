@@ -403,7 +403,7 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
     """
 
     try:
-        subprocess.run(['which', 'lbunzip2'], check=True)
+        subprocess.run(['which', 'bunzip2'], check=True)
         print('found lbzip2 in the system')
     except Exception as _e:
         print(_e)
@@ -433,7 +433,7 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
         # else go ahead
         # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
         with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
-            subprocess.run(['lbunzip2'], input=_f_in.read(), stdout=_f_out)
+            subprocess.run(['bunzip2'], input=_f_in.read(), stdout=_f_out)
         # remove the original if requested:
         if not _keep:
             subprocess.run(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))], check=True)
