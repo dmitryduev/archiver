@@ -2026,7 +2026,15 @@ class RoboaoArchiver(Archiver):
                 # print(jj)
                 with fits.open(os.path.join(_path_in, '{:s}.fits'.format(_file)), memmap=True) as _hdulist:
                     for ii, _ in enumerate(_hdulist):
-                        summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+                        try:
+                            summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+                        except Exception as _e:
+                            print(_e)
+                            continue
+
+            # check if there are data to be processed:
+            if np.abs(np.max(summed_seeing_limited_frame)) < 1e-9:  # only zeros in summed_seeing_limited_frame
+                raise Exception('No data in the cube to be processed.')
 
             # load darks and flats
             dark, flat = RoboaoPipeline.load_darks_and_flats(_path_calib, _mode, _filt, image_size[0])
@@ -5117,10 +5125,18 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                 with fits.open(_file, memmap=True) as _hdulist:
                     # frames_before = sum(n_frames_files[:jj])
                     for ii, _ in enumerate(_hdulist):
-                        summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+                        try:
+                            summed_seeing_limited_frame += np.nan_to_num(_hdulist[ii].data)
+                        except Exception as _e:
+                            print(_e)
+                            continue
                         # print(ii + frames_before, '\n', _data[ii, :, :])
                 if _v:
                     bar.update(iterations=files_sizes[jj])
+
+            # check if there are data to be processed:
+            if np.abs(np.max(summed_seeing_limited_frame)) < 1e-9:  # only zeros in summed_seeing_limited_frame
+                raise Exception('No data in the cube to be processed.')
 
             # remove cosmic rays:
             if _v:
@@ -5206,7 +5222,11 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
                 with fits.open(_file) as _hdulist:
                     # frames_before = sum(n_frames_files[:jj])
                     for ii, _ in enumerate(_hdulist):
-                        img = np.array(np.nan_to_num(_hdulist[ii].data), dtype=np.float)  # do proper casting
+                        try:
+                            img = np.array(np.nan_to_num(_hdulist[ii].data), dtype=np.float)  # do proper casting
+                        except Exception as _e:
+                            print(_e)
+                            continue
 
                         # tic = _time()
                         img = self.calibrate_frame(img, dark, flat, _iter=3)
