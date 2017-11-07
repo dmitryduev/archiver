@@ -389,13 +389,14 @@ def rho(x, y, x_0=1024, y_0=1024):
     return np.sqrt((x-x_0)**2 + (y-y_0)**2)
 
 
-def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
+def lbunzip2(_path_in, _files, _path_out, _cmd='bunzip2', _keep=True, _rewrite=True, _v=False):
 
     """
         A wrapper around lbunzip2 - a parallel version of bunzip2
     :param _path_in: folder with the files to be unzipped
     :param _files: string or list of strings with file names to be uncompressed
     :param _path_out: folder to place the output
+    :param _cmd: bunzip2 or lbunzip2?
     :param _rewrite: rewrite if output exists?
     :param _keep: keep the original?
     :param _v: verbose?
@@ -403,11 +404,11 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
     """
 
     try:
-        subprocess.run(['which', 'bunzip2'], check=True)
-        print('found lbzip2 in the system')
+        subprocess.run(['which', _cmd], check=True)
+        print('found {:s} in the system'.format(_cmd))
     except Exception as _e:
         print(_e)
-        print('lbzip2 not installed in the system. go ahead and install it!')
+        print('{:s} not installed in the system. go ahead and install it!'.format(_cmd))
         return False
 
     if isinstance(_files, str):
@@ -433,7 +434,7 @@ def lbunzip2(_path_in, _files, _path_out, _keep=True, _rewrite=True, _v=False):
         # else go ahead
         # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
         with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
-            subprocess.run(['bunzip2'], input=_f_in.read(), stdout=_f_out)
+            subprocess.run([_cmd], input=_f_in.read(), stdout=_f_out)
         # remove the original if requested:
         if not _keep:
             subprocess.run(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))], check=True)
