@@ -2005,7 +2005,7 @@ class RoboaoArchiver(Archiver):
             _filt, _date_utc = seeing_obs.db_entry['filter'], seeing_obs.db_entry['date_utc']
             # get fits header
             fits_header = get_fits_header(os.path.join(_path_in, '{:s}.fits'.format(_seeing_frames[0])))
-            _mode, _exp = str(fits_header['MODE_NUM'][0]), fits_header['EXPOSURE'][0]
+            _mode, _exp = str(int(fits_header['MODE_NUM'][0])), fits_header['EXPOSURE'][0]
             # print(_filt, _date_utc, _mode, _exp)
 
             # get total number of frames to allocate
@@ -5155,7 +5155,7 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             # load darks and flats
             if _v:
                 print('Loading darks and flats')
-            dark, flat = self.load_darks_and_flats(_path_calib, self.db_entry['fits_header']['MODE_NUM'][0],
+            dark, flat = self.load_darks_and_flats(_path_calib, str(int(self.db_entry['fits_header']['MODE_NUM'][0])),
                                                    self.db_entry['filter'], image_size[0])
             if dark is None or flat is None:
                 raise Exception('Could not open darks and flats')
