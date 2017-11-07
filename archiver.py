@@ -3230,8 +3230,10 @@ class RoboaoPipeline(Pipeline):
             dark_image = os.path.join(_path_calib, 'dark_{:s}.fits'.format(str(_mode)))
         flat_image = os.path.join(_path_calib, 'flat_{:s}.fits'.format(_filt))
 
-        if not os.path.exists(dark_image) or not os.path.exists(flat_image):
-            raise Exception('Could not find calibration (some) data in {:s}'.format(_path_calib))
+        if not os.path.exists(dark_image):
+            raise Exception('Could not find calibration {:s} in {:s}'.format(dark_image, _path_calib))
+        elif not os.path.exists(flat_image):
+            raise Exception('Could not find calibration {:s} in {:s}'.format(flat_image, _path_calib))
         else:
             with fits.open(dark_image) as dark, fits.open(flat_image) as flat:
                 # replace NaNs if necessary
