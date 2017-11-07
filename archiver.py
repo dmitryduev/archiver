@@ -441,9 +441,9 @@ def lbunzip2(_path_in, _files, _path_out, _cmd='lbunzip2', _keep=True, _rewrite=
 
         # NOTE: trying to get rid of i/o wait issues
         # copy zipped to tmp dir:
-        shutil.copy2(os.path.join(_path_in, _file), _path_out)
+        shutil.copy2(os.path.join(_path_in, file_in), _path_out)
         # bz2.decompress and remove copied original
-        subprocess.run([_cmd, file_out])
+        subprocess.run([_cmd, file_in])
 
         # remove the original if requested:
         if not _keep:
