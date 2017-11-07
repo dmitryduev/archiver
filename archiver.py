@@ -55,6 +55,7 @@ import lacosmicx as lax
 import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
 from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
+import bz2
 
 
 # Scale bars
@@ -403,13 +404,13 @@ def lbunzip2(_path_in, _files, _path_out, _cmd='bunzip2', _keep=True, _rewrite=T
     :return:
     """
 
-    try:
-        subprocess.run(['which', _cmd], check=True)
-        print('found {:s} in the system'.format(_cmd))
-    except Exception as _e:
-        print(_e)
-        print('{:s} not installed in the system. go ahead and install it!'.format(_cmd))
-        return False
+    # try:
+    #     subprocess.run(['which', _cmd], check=True)
+    #     print('found {:s} in the system'.format(_cmd))
+    # except Exception as _e:
+    #     print(_e)
+    #     print('{:s} not installed in the system. go ahead and install it!'.format(_cmd))
+    #     return False
 
     if isinstance(_files, str):
         _files_list = [_files]
@@ -426,6 +427,8 @@ def lbunzip2(_path_in, _files, _path_out, _cmd='bunzip2', _keep=True, _rewrite=T
         file_out = os.path.join(_path_out, os.path.splitext(_file)[0])
 
         if not _rewrite:
+            if os.path.exists(file_out) and os.stat(file_out).st_size == 0:
+                os.remove(file_out)
             if os.path.exists(file_out) and os.stat(file_out).st_size != 0:
                 # print('uncompressed file {:s} already exists, skipping'.format(file_in))
                 if _v:
@@ -433,8 +436,15 @@ def lbunzip2(_path_in, _files, _path_out, _cmd='bunzip2', _keep=True, _rewrite=T
                 continue
         # else go ahead
         # print('lbunzip2 <{:s} >{:s}'.format(file_in, file_out))
-        with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
-            subprocess.run([_cmd], input=_f_in.read(), stdout=_f_out)
+        # with open(file_in, 'rb') as _f_in, open(file_out, 'wb') as _f_out:
+        #     subprocess.run([_cmd], input=_f_in.read(), stdout=_f_out)
+
+        # NOTE: trying to get rid of i/o wait issues
+        # copy zipped to tmp dir:
+        shutil.copy2(os.path.join(_path_in, _file), _path_out)
+        # bz2.decompress and remove copied original
+        subprocess.run([_cmd, file_out])
+
         # remove the original if requested:
         if not _keep:
             subprocess.run(['rm', '-f', '{:s}'.format(os.path.join(_path_in, _file))], check=True)
