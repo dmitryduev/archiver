@@ -4297,9 +4297,12 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     self.db_entry['pipelined'][self.name]['classified_as'] = classified_as
 
                     # run c++ code
-                    subprocess.run(['{:s} pipeline_settings.txt'.format(
-                        self.config['pipeline'][self.name]['pipeline_executable'])],
-                        check=True, shell=True, cwd=out_dir)
+                    try:
+                        subprocess.run(['{:s} pipeline_settings.txt'.format(
+                            self.config['pipeline'][self.name]['pipeline_executable'])],
+                            check=True, shell=True, cwd=out_dir)
+                    except Exception as _e:
+                        print(_e)
 
                     # reduction successful? prepare db entry for update
                     f100p = os.path.join(out_dir, '100p.fits')
@@ -4313,7 +4316,11 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                     self.db_entry['pipelined'][self.name]['status']['retries'] += 1
 
                     # set last_modified as 100p.fits modified date:
-                    time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir, '100p.fits')).st_mtime)
+                    if os.path.exists(f100p):
+                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(out_dir,
+                                                                                           '100p.fits')).st_mtime)
+                    else:
+                        time_tag = utc_now()
                     self.db_entry['pipelined'][self.name]['last_modified'] = time_tag
 
                 for _file in raws:
