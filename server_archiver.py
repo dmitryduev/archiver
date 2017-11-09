@@ -1556,8 +1556,7 @@ def add_user():
     try:
         user = flask.request.args['user']
         password = flask.request.args['password']
-        programs = [p.strip().encode('ascii', 'ignore')
-                    for p in flask.request.args['programs'].split(',')]
+        programs = [str(p.strip()) for p in flask.request.args['programs'].split(',')]
         # print(user, password, programs)
         # print(len(user), len(password), len(programs))
         if len(user) == 0 or len(password) == 0:
@@ -1595,8 +1594,7 @@ def edit_user():
             return 'Cannot remove the admin!'
         user = flask.request.args['edit-user']
         password = flask.request.args['edit-password']
-        programs = [p.strip().encode('ascii', 'ignore')
-                    for p in flask.request.args['edit-programs'].split(',')]
+        programs = [str(p.strip()) for p in flask.request.args['edit-programs'].split(',')]
         # print(user, password, programs, id)
         # print(len(user), len(password), len(programs))
         if len(user) == 0:
