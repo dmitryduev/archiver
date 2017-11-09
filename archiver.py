@@ -1191,15 +1191,15 @@ class RoboaoArchiver(Archiver):
             _program_pi = {}
             for doc in cursor:
                 # handle admin separately
-                if doc['_id'] == 'admin':
+                if str(doc['_id']) == 'admin':
                     continue
                 _progs = doc['programs']
                 for v in _progs:
                     # multiple users could have access to the same program, that's totally fine!
                     if str(v) not in _program_pi:
-                        _program_pi[str(v)] = [doc['_id']]
+                        _program_pi[str(v)] = [str(doc['_id'])]
                     else:
-                        _program_pi[str(v)].append(doc['_id'])
+                        _program_pi[str(v)].append(str(doc['_id']))
                         # print(program_pi)
         except Exception as _e:
             _program_pi = {}
