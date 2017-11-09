@@ -196,7 +196,8 @@
                                             <br>
                                             <p style="margin-top: 10px;">
                                             {% for obs in programs[program] %}
-                                                {% if obs['pipelined']['bright_star']['status']['done'] and
+                                                {% if 'bright_star' in obs['pipelined'] and
+                                                        obs['pipelined']['bright_star']['status']['done'] and
                                                         obs['pipelined']['bright_star']['classified_as'] == 'failed' %}
                                                     {{ obs['_id'] }}: failed<br>
                                                 {% endif %}
