@@ -3805,9 +3805,9 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
-            if self.db_entry['_id'] == '3_J1144+6946_VIC_Si_o_20170607_043349.042103':
-                print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-                input('WAIT!!')
+            # if self.db_entry['_id'] == '3_J1144+6946_VIC_Si_o_20170607_043349.042103':
+            #     print(_pipe_done, _pipe_failed, _preview_done, _outdated)
+            #     input('WAIT!!')
 
             # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
             go = (_pipe_done and (not _pipe_failed)) and ((not _preview_done) or _outdated)
