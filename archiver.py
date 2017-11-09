@@ -2888,6 +2888,10 @@ class RoboaoObservation(Observation):
                 _path_archive = os.path.join(self.config['path']['path_archive'], _date)
                 _obs = self.id
 
+                # nothing to compress?
+                if not os.path.exists(os.path.join(_path_archive, _obs)):
+                    return {'status': 'ok', 'message': None}
+
                 pipelines = [_path for _path in os.listdir(os.path.join(_path_archive, _obs))
                              if os.path.isdir(os.path.join(_path_archive, _obs, _path)) and _path[0] != '.']
                 _p = subprocess.run(
@@ -3822,8 +3826,12 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['strehl']['status']['retries']
+
             # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-            go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated)
+            go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated) \
+                 and (_num_tries <= self.config['misc']['max_retries'])
 
             return go
 
@@ -3843,8 +3851,12 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['pca']['status']['retries']
+
             # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-            go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated)
+            go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated) \
+                 and (_num_tries <= self.config['misc']['max_retries'])
 
             return go
 
@@ -4856,9 +4868,12 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             # # last_modified == pipe_last_modified?
             # _outdated = abs((self.db_entry['pipelined'][self.name]['strehl']['last_modified'] -
             #                  self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            # # how many times tried?
+            # _num_tries = self.db_entry['pipelined'][self.name]['strehl']['status']['retries']
             #
             # # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-            # go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated)
+            # go = (_pipe_done and (not _pipe_failed)) and ((not _strehl_done) or _outdated) \
+            #      and (_num_tries <= self.config['misc']['max_retries'])
             #
             # return go
             return False
@@ -4878,9 +4893,12 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             # # last_modified == pipe_last_modified?
             # _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['last_modified'] -
             #                  self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            # # how many times tried?
+            # _num_tries = self.db_entry['pipelined'][self.name]['pca']['status']['retries']
             #
             # # print(_pipe_done, _pipe_failed, _preview_done, _outdated)
-            # go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated)
+            # go = (_pipe_done and (not _pipe_failed)) and ((not _pca_done) or _outdated) \
+            #      and (_num_tries <= self.config['misc']['max_retries'])
             #
             # return go
             return False
