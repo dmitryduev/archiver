@@ -4864,7 +4864,11 @@ class RoboaoFaintStarPipeline(RoboaoPipeline):
             _outdated = abs((self.db_entry['pipelined'][self.name]['preview']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
 
-            go = _pipe_done and ((not _preview_done) or _outdated)
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['preview']['retries']
+
+            go = _pipe_done and ((not _preview_done) or _outdated) \
+                 and (_num_tries <= self.config['misc']['max_retries'])
 
             return go
 
