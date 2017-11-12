@@ -3882,9 +3882,10 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             # pca preview done?
             _pca_preview_done = self.db_entry['pipelined'][self.name]['pca']['preview']['done']
 
-            # last_modified == pipe_last_modified?
-            _outdated = abs((self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] -
-                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0
+            # last_modified == pipe_last_modified? (or old DB entry)
+            _outdated = 'last_modified' not in self.db_entry['pipelined'][self.name]['pca']['preview'] or \
+                        (abs((self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] -
+                             self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0)
 
             go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated)
 
