@@ -3887,7 +3887,11 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                         (abs((self.db_entry['pipelined'][self.name]['pca']['preview']['last_modified'] -
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0)
 
-            go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated)
+            # how many times tried?
+            _num_tries = self.db_entry['pipelined'][self.name]['pca']['status']['retries']
+
+            go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated) \
+                 and (_num_tries <= self.config['misc']['max_retries'])
 
             return go
 
