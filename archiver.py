@@ -2464,6 +2464,14 @@ class RoboaoObservation(Observation):
                             # bad time tag? force redo!
                             if abs((time_tag -
                                     self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
+
+                                # make sure nothing propagates accidentally before DB record is updated
+                                self.db_entry['pipelined'].pop(_pipe_name, None)
+                                self.db_entry['distributed']['status'] = False
+                                self.db_entry['distributed']['location'] = []
+                                _utc_now = utc_now()
+                                self.db_entry['distributed']['last_modified'] = _utc_now
+
                                 return {'status': 'ok',
                                         'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
                                         'db_record_update': ({'_id': self.id},
@@ -2471,7 +2479,7 @@ class RoboaoObservation(Observation):
                                                                  '$set': {
                                                                      'distributed.status': False,
                                                                      'distributed.location': [],
-                                                                     'distributed.last_modified': utc_now()
+                                                                     'distributed.last_modified': _utc_now
                                                                  },
                                                                  '$unset': {
                                                                      'pipelined.{:s}'.format(_pipe_name): 1
@@ -2482,13 +2490,20 @@ class RoboaoObservation(Observation):
                 # path does not exist? make sure it's not present in DB entry and/or not marked 'done'
                 elif (_pipe_name in self.db_entry['pipelined']) and \
                         self.db_entry['pipelined'][_pipe_name]['status']['done']:
+
+                    self.db_entry['pipelined'].pop(_pipe_name, None)
+                    self.db_entry['distributed']['status'] = False
+                    self.db_entry['distributed']['location'] = []
+                    _utc_now = utc_now()
+                    self.db_entry['distributed']['last_modified'] = _utc_now
+
                     return {'status': 'ok', 'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
                             'db_record_update': ({'_id': self.id},
                                                  {
                                                      '$set': {
                                                                  'distributed.status': False,
                                                                  'distributed.location': [],
-                                                                 'distributed.last_modified': utc_now()
+                                                                 'distributed.last_modified': _utc_now
                                                              },
                                                      '$unset': {
                                                          'pipelined.{:s}'.format(_pipe_name): 1
@@ -2499,13 +2514,20 @@ class RoboaoObservation(Observation):
 
             except Exception as _e:
                 traceback.print_exc()
+
+                self.db_entry['pipelined'].pop(_pipe_name, None)
+                self.db_entry['distributed']['status'] = False
+                self.db_entry['distributed']['location'] = []
+                _utc_now = utc_now()
+                self.db_entry['distributed']['last_modified'] = _utc_now
+
                 return {'status': 'error', 'message': str(_e),
                         'db_record_update': ({'_id': self.id},
                                              {
                                                  '$set': {
                                                      'distributed.status': False,
                                                      'distributed.location': [],
-                                                     'distributed.last_modified': utc_now()
+                                                     'distributed.last_modified': _utc_now
                                                  },
                                                  '$unset': {
                                                     'pipelined.{:s}'.format(_pipe_name): 1
