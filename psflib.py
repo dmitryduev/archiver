@@ -368,8 +368,8 @@ def naptime(_config):
             next_midnight = datetime.datetime(now.year, now.month, now.day, tzinfo=tz) \
                             + datetime.timedelta(days=1)
 
-            hm_start = map(int, _config['misc']['nap_time_start'].split(':'))
-            hm_stop = map(int, _config['misc']['nap_time_stop'].split(':'))
+            hm_start = list(map(int, _config['misc']['nap_time_start'].split(':')))
+            hm_stop = list(map(int, _config['misc']['nap_time_stop'].split(':')))
 
             if hm_stop[0] < hm_start[0]:
                 h_before_midnight = 24 - (hm_start[0] + hm_start[1] / 60.0)
@@ -732,7 +732,7 @@ if __name__ == '__main__':
                                             # drizzled
                                             x *= 2.0
                                             y *= 2.0
-                                            x, y = map(int, [x, y])
+                                            x, y = list(map(int, [x, y]))
 
                                             # out of the frame? do not try to fix that, just skip!
                                             if x - _win < 0 or x + _win + 1 >= scidata.shape[0] \
