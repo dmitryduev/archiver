@@ -2454,31 +2454,31 @@ class RoboaoObservation(Observation):
                 if os.path.exists(_path_pipe):
                     # do not check enqueued stuff here. make sure 100p.fits exists
                     if (_pipe_name in self.db_entry['pipelined']) and \
-                            (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']) and \
-                            ('100p.fits' in os.listdir(_path_pipe)):
+                            (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']):
                         # check modified date:
                         _fits = '100p.fits' if _pipe_name == 'bright_star' \
                             else '{:s}_summed.fits'.format(self.db_entry['_id'])
-                        time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_pipe, _fits)).st_mtime)
-                        # time_tag = mdate_walk(_path_pipe)
-                        # bad time tag? force redo!
-                        if abs((time_tag -
-                                self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
-                            return {'status': 'ok',
-                                    'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
-                                    'db_record_update': ({'_id': self.id},
-                                                         {
-                                                             '$set': {
-                                                                 'distributed.status': False,
-                                                                 'distributed.location': [],
-                                                                 'distributed.last_modified': utc_now()
-                                                             },
-                                                             '$unset': {
-                                                                 'pipelined.{:s}'.format(_pipe_name): 1
+                        if _fits in os.listdir(_path_pipe):
+                            time_tag = datetime.datetime.utcfromtimestamp(os.stat(os.path.join(_path_pipe, _fits)).st_mtime)
+                            # time_tag = mdate_walk(_path_pipe)
+                            # bad time tag? force redo!
+                            if abs((time_tag -
+                                    self.db_entry['pipelined'][_pipe_name]['last_modified']).total_seconds()) > 1.0:
+                                return {'status': 'ok',
+                                        'message': 'DB entry for {:s} does not reflect reality'.format(self.id),
+                                        'db_record_update': ({'_id': self.id},
+                                                             {
+                                                                 '$set': {
+                                                                     'distributed.status': False,
+                                                                     'distributed.location': [],
+                                                                     'distributed.last_modified': utc_now()
+                                                                 },
+                                                                 '$unset': {
+                                                                     'pipelined.{:s}'.format(_pipe_name): 1
+                                                                 }
                                                              }
-                                                         }
-                                                         )
-                                    }
+                                                             )
+                                        }
                 # path does not exist? make sure it's not present in DB entry and/or not marked 'done'
                 elif (_pipe_name in self.db_entry['pipelined']) and \
                         self.db_entry['pipelined'][_pipe_name]['status']['done']:
