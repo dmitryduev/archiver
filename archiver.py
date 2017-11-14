@@ -2450,11 +2450,12 @@ class RoboaoObservation(Observation):
                 # pipe self
                 _path_pipe = os.path.join(self.config['path']['path_archive'], _date, self.id, _pipe_name)
 
-                # path exists? if yes -- processing must have occurred
+                # path exists? if yes -- processing must have occurred (to some extent at least)
                 if os.path.exists(_path_pipe):
-                    # do not check enqueued stuff here:
+                    # do not check enqueued stuff here. make sure 100p.fits exists
                     if (_pipe_name in self.db_entry['pipelined']) and \
-                            (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']):
+                            (not self.db_entry['pipelined'][_pipe_name]['status']['enqueued']) and \
+                            ('100p.fits' in os.listdir(_path_pipe)):
                         # check modified date:
                         _fits = '100p.fits' if _pipe_name == 'bright_star' \
                             else '{:s}_summed.fits'.format(self.db_entry['_id'])
@@ -3888,7 +3889,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                              self.db_entry['pipelined'][self.name]['last_modified']).total_seconds()) > 1.0)
 
             # how many times tried?
-            _num_tries = self.db_entry['pipelined'][self.name]['pca']['status']['retries']
+            _num_tries = self.db_entry['pipelined'][self.name]['pca']['preview']['retries']
 
             go = (_pipe_done and (not _pipe_failed) and _pca_done) and ((not _pca_preview_done) or _outdated) \
                  and (_num_tries <= self.config['misc']['max_retries'])
@@ -4568,7 +4569,11 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
             _cc = self.db_entry['pipelined'][self.name]['pca']['contrast_curve']
 
             # number of pixels in X on the detector
-            _pix_x = int(re.search(r'(:)(\d+)', self.db_entry['fits_header']['DETSIZE'][0]).group(2))
+            try:
+                _pix_x = int(re.search(r'(:)(\d+)', self.db_entry['fits_header']['DETSIZE'][0]).group(2))
+            except KeyError:
+                # this should be there, even if it's sum.fits
+                _pix_x = int(self.db_entry['fits_header']['NAXIS1'][0])
 
             self.generate_pca_preview(path_out, _preview_img=_preview_img, _cc=_cc,
                                       _fow_x=self.config['telescope'][self.telescope]['fov_x'], _pix_x=_pix_x,
