@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use('Agg')
 import argparse
 import signal
+import timeout_decorator
 import psutil
 from collections import OrderedDict
 import pytz
@@ -998,10 +999,10 @@ class RoboaoArchiver(Archiver):
                                                                                            result['_id'],
                                                                                            result['status']))
                     # remove from self.task_hashes
-                    if result['status'] == 'ok' and 'hash' in result:
+                    if (result['status'] == 'ok') and ('hash' in result):
                         self.task_hashes.remove(result['hash'])
                     # error? remove from self.task_hashes. max_retries won't allow it to come back too many times!
-                    elif result['status'] == 'error' and 'hash' in result:
+                    elif (result['status'] == 'error') and ('hash' in result):
                         self.task_hashes.remove(result['hash'])
 
                     # update DB entry
@@ -1327,12 +1328,13 @@ class RoboaoArchiver(Archiver):
             self.logger.error('Error inserting {:s} into {:s}'.format(_db_entry, _collection))
             self.logger.error(e)
 
-    # @timeout(seconds_before_timeout=30)
+    @timeout_decorator.timeout(30, use_signals=False)
     def update_db_entry(self, _collection=None, upd=None):
         """
             Update DB entry
             Note: it's mainly used by archiver's harvester, which is run in separate thread,
-                  therefore signals don't work, so can't use @timeout :(
+                  therefore signals don't work, so can't use @timeout.
+                  instead, using @timeout_decorator with use_signals=False to utilize multiprocessing
         :return:
         """
         assert _collection is not None, 'Must specify collection'
