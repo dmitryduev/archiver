@@ -997,15 +997,16 @@ class RoboaoArchiver(Archiver):
                     self.logger.info('Task {:s} for {:s} finished with status {:s}'.format(result['job'],
                                                                                            result['_id'],
                                                                                            result['status']))
-                    # update DB entry
-                    if 'db_record_update' in result:
-                        self.update_db_entry(_collection='coll_obs', upd=result['db_record_update'])
                     # remove from self.task_hashes
                     if result['status'] == 'ok' and 'hash' in result:
                         self.task_hashes.remove(result['hash'])
                     # error? remove from self.task_hashes. max_retries won't allow it to come back too many times!
                     elif result['status'] == 'error' and 'hash' in result:
                         self.task_hashes.remove(result['hash'])
+
+                    # update DB entry
+                    if 'db_record_update' in result:
+                        self.update_db_entry(_collection='coll_obs', upd=result['db_record_update'])
                 except Exception as _e:
                     print(_e)
                     traceback.print_exc()
