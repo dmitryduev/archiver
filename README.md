@@ -367,50 +367,50 @@ Please refer to Jensen-Clem, Duev, Riddle+ 2017 \[1\] and references therein for
 <pre><code>
 /path/to/archive/
 ├──yyyymmdd/
-   ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS/
-   │  ├──bright_star/                                                                               <= Results of bright star pipeline (BSP) [1, section 3.2] 
-   │  │  ├──preview/                                                                                <= Automatically generated previews
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_full.png
-   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_cropped.png
+   ├──ID/                              <= observation ID of the form programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS
+   │  ├──bright_star/                  <= Results of bright star pipeline (BSP) [1, section 3.2] 
+   │  │  ├──preview/                   <= Automatically generated previews
+   │  │  │  ├──ID_full.png
+   │  │  │  └──ID_cropped.png
    │  │  ├──strehl/
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_strehl.txt            <= Strehl ratio + star image metrics
-   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_box.fits              <= Cut around star used in Strehl computation
+   │  │  │  ├──ID_strehl.txt            <= Strehl ratio + star image metrics
+   │  │  │  └──ID_box.fits              <= Cut around star used in Strehl computation
    │  │  ├──pca/
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.fits              <= Result of high contrast pipeline [1, section 3.3] 
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.png    <= 5-sigma contrast curve plot [1, section 3.3]
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.txt    <= 5-sigma contrast curve [1, section 3.3]
-   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.png               <= Automatically generated preview
-   │  │  ├──frames.txt                                                                              <= Individual raw frame quality, guide star flux, lock position, bias level
-   │  │  ├──<b>20p.fits</b>                                                                                <= 20% best quality frames registered and stacked with BSP [1, section 3.2]
-   │  │  └──<b>100p.fits</b>                                                                               <= 100% frames registered and stacked with BSP [1, section 3.2]
-   │  ├──faint_star/                                                                                <= Results of faint star pipeline (FSP) [1, section 3.2]
-   │  │  ├──preview/                                                                                <= Automatically generated previews
+   │  │  │  ├──<b>ID.fits</b>                  <= Result of high contrast pipeline [1, section 3.3] 
+   │  │  │  ├──<b>ID_contrast_curve.png</b>    <= 5-sigma contrast curve plot [1, section 3.3]
+   │  │  │  ├──<b>ID_contrast_curve.txt</b>    <= 5-sigma contrast curve [1, section 3.3]
+   │  │  │  └──ID_pca.png               <= Automatically generated preview
+   │  │  ├──frames.txt                  <= Individual raw frame quality, guide star flux, lock position, bias level
+   │  │  ├──<b>20p.fits</b>                    <= 20% best quality frames registered and stacked with BSP [1, section 3.2]
+   │  │  └──<b>100p.fits</b>                   <= 100% frames registered and stacked with BSP [1, section 3.2]
+   │  ├──faint_star/                    <= Results of faint star pipeline (FSP) [1, section 3.2]
+   │  │  ├──preview/                    <= Automatically generated previews
    │  │  │  └──...
-   │  │  ├──strehl/                                                                                 <= Same as for BSP. Currently, not computing
+   │  │  ├──strehl/                     <= Same as for BSP. Currently, not computing
    │  │  │  └──...
-   │  │  ├──pca/                                                                                    <= Same as for BSP. Currently, not running
+   │  │  ├──pca/                        <= Same as for BSP. Currently, not running
    │  │  │  └──...
-   │  │  ├──<b>programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_summed.fits</b>              <= Result of FSP [1, section 3.2]
-   │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_simple_sum.fits          <= Simple stack of all raw frames without registration
-   │  ├──extended_object/                                                                           <= Results of extended object pipeline (FSP) [1, section 3.4]
+   │  │  ├──<b>ID_summed.fits</b>              <= Result of FSP [1, section 3.2]
+   │  │  └──ID_simple_sum.fits          <= Simple stack of all raw frames without registration
+   │  ├──extended_object/               <= Results of extended object pipeline (FSP) [1, section 3.4]
    │  │  ├──preview/
    │  │  │  └──...
-   │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_deconvolved.fits
-   │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS.tar.bz2
+   │  │  └──ID_deconvolved.fits
+   │  └──ID.tar.bz2                     <= Compress contents of folder ID/
    ├──.../
-   ├──summary/
+   ├──summary/                          <= Nightly summary data
    │  ├──psflib/
-   │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.png
-   │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.fits
+   │  │  ├──ID.png
+   │  │  ├──ID.fits
    │  │  └──...
    │  ├──seeing/
-   │  │  ├──yyyymmdd_hhmmss.png
+   │  │  ├──yyyymmdd_hhmmss.png        <= Individual seeing observations
    │  │  ├──...
-   │  │  ├──seeing.yyyymmdd.txt
-   │  │  └──seeing.yyyymmdd.png
-   │  ├──contrast_curve.yyyymmdd.png
-   │  └──strehl.yyyymmdd.png
-   └──calib/
+   │  │  ├──seeing.yyyymmdd.txt        <= Summary seeing data
+   │  │  └──seeing.yyyymmdd.png        <= Summary seeing plot
+   │  ├──contrast_curve.yyyymmdd.png   <= Summary of contrast curves
+   │  └──strehl.yyyymmdd.png           <= Obsevation Strehl ratios as function of time
+   └──calib/                           <= Master calibration data
       ├──flat_c.fits
       ├──flat_lp600.fits
       ├──flat_Sg.fits
@@ -424,7 +424,7 @@ Please refer to Jensen-Clem, Duev, Riddle+ 2017 \[1\] and references therein for
       ├──dark_9.fits
       └──dark_10.fits
 |──.../
-└──psf_library.fits
+└──psf_library.fits                    <= PSF library for BSP high-contrast pipeline
 </code></pre>
 
 ---
