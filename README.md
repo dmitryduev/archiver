@@ -362,34 +362,37 @@ keeping this structure in mind (in fact, **archiver.py** will take care of that 
 once the database is up and running).
 
 ##### Science observations + daily summary plots (seeing, Strehl, contrast curves)
-File naming and descriptions:
-```
+File naming and descriptions. Files of greatest interest to users are shown in bold.
+Please refer to Jensen-Clem, Duev, Riddle+ 2017 \[1\] and references therein for technical details.
+<pre><code>
 /path/to/archive/
 ├──yyyymmdd/
    ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS/
-   │  ├──bright_star/
-   │  │  ├──preview/
+   │  ├──bright_star/                                                                               <= Results of bright star pipeline (BSP) [1, section 3.2] 
+   │  │  ├──preview/                                                                                <= Automatically generated previews
    │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_full.png
    │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_cropped.png
    │  │  ├──strehl/
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_strehl.txt
-   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_box.fits
+   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_strehl.txt            <= Strehl ratio + star image metrics
+   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_box.fits              <= Cut around star used in Strehl computation
    │  │  ├──pca/
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.png
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.png
-   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.txt
-   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.fits
-   │  │  ├──20p.fits
-   │  │  └──100p.fits
-   │  ├──faint_star/
-   │  │  ├──preview/
+   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.fits              <= Result of high contrast pipeline [1, section 3.3] 
+   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.png    <= 5-sigma contrast curve plot [1, section 3.3]
+   │  │  │  ├──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_contrast_curve.txt    <= 5-sigma contrast curve [1, section 3.3]
+   │  │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_pca.png               <= Automatically generated preview
+   │  │  ├──frames.txt                                                                              <= Individual raw frame quality, guide star flux, lock position, bias level
+   │  │  ├──<b>20p.fits</b>                                                                                <= 20% best quality frames registered and stacked with BSP [1, section 3.2]
+   │  │  └──<b>100p.fits</b>                                                                               <= 100% frames registered and stacked with BSP [1, section 3.2]
+   │  ├──faint_star/                                                                                <= Results of faint star pipeline (FSP) [1, section 3.2]
+   │  │  ├──preview/                                                                                <= Automatically generated previews
    │  │  │  └──...
-   │  │  ├──strehl/
+   │  │  ├──strehl/                                                                                 <= Same as for BSP. Currently, not computing
    │  │  │  └──...
-   │  │  ├──pca/
+   │  │  ├──pca/                                                                                    <= Same as for BSP. Currently, not running
    │  │  │  └──...
-   │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_summed.fits
-   │  ├──extended_object/
+   │  │  ├──<b>programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_summed.fits</b>              <= Result of FSP [1, section 3.2]
+   │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_simple_sum.fits          <= Simple stack of all raw frames without registration
+   │  ├──extended_object/                                                                           <= Results of extended object pipeline (FSP) [1, section 3.4]
    │  │  ├──preview/
    │  │  │  └──...
    │  │  └──programID_objectName_camera_filter_mark_yyyymmdd_HHMMSS.SSSSSS_deconvolved.fits
@@ -422,7 +425,7 @@ File naming and descriptions:
       └──dark_10.fits
 |──.../
 └──psf_library.fits
-```
+</code></pre>
 
 ---
 
