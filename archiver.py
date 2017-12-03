@@ -4178,7 +4178,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                 #     print(_e)
                 #     print("Failed to process", f)
 
-            for fn, orig_fn in sorted(files_to_analyse):
+            for fn, orig_fn in sorted(files_to_analyse)[:1]:
                 # print('_____________________')
                 # print(files_to_analyse)
                 if _v:
@@ -4357,7 +4357,10 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                 for _file in raws:
                     if _v:
                         print('removing', _file)
-                    os.remove(os.path.join(_file))
+                    try:
+                        os.remove(os.path.join(_file))
+                    except Exception as _e:
+                        print(_e)
 
         elif part == 'bright_star_pipeline:preview':
             # generate previews
