@@ -4144,6 +4144,8 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
         _path_calib = os.path.join(self.config['path']['path_archive'], _date, 'calib')
 
         if part == 'bright_star_pipeline':
+            # make sure to increment number of tries
+            self.db_entry['pipelined'][self.name]['status']['retries'] += 1
             # steps from reduce_data_multithread.py + image_reconstruction.cpp
 
             # raw files:
@@ -4344,7 +4346,7 @@ class RoboaoBrightStarPipeline(RoboaoPipeline):
                         self.db_entry['pipelined'][self.name]['status']['done'] = False
                     self.db_entry['pipelined'][self.name]['status']['enqueued'] = False
                     self.db_entry['pipelined'][self.name]['status']['force_redo'] = False
-                    self.db_entry['pipelined'][self.name]['status']['retries'] += 1
+                    # self.db_entry['pipelined'][self.name]['status']['retries'] += 1
 
                     # set last_modified as 100p.fits modified date:
                     if os.path.exists(f100p):
