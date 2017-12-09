@@ -2547,6 +2547,9 @@ class RoboaoObservation(Observation):
                 if len(self.aux['seeing']['frames']) > 0:
                     # date_utc, seeing, filter, exposure:
                     seeing_data = [[s[1], s[3], s[2], s[6]] for s in self.aux['seeing']['frames'] if None not in s]
+                    # ain't got no useful data?
+                    if len(seeing_data) == 0:
+                        return {'status': 'ok', 'message': None}
                     seeing_data = np.array(seeing_data)
                     # sort by time stamp:
                     seeing_data = seeing_data[seeing_data[:, 0].argsort()]
