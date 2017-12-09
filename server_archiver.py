@@ -524,6 +524,9 @@ def get_dates(user_id, coll, coll_aux, start=None, stop=None, max_dates=100):
                         # sort by time, not by name:
                         # don't consider failed frames
                         seeing_frames = [frame for frame in date_data[key]['frames'] if None not in frame]
+                        if len(seeing_frames) == 0:
+                            aux[key]['done'] = False
+                            continue
                         ind_sort = np.argsort([frame[1] for frame in seeing_frames])
                         for frame in np.array(seeing_frames)[ind_sort]:
                             if not np.any(np.equal(frame, None)):
