@@ -999,10 +999,12 @@ class RoboaoArchiver(Archiver):
                                                                                            result['_id'],
                                                                                            result['status']))
                     # remove from self.task_hashes
-                    if (result['status'] == 'ok') and ('hash' in result):
-                        self.task_hashes.remove(result['hash'])
-                    # error? remove from self.task_hashes. max_retries won't allow it to come back too many times!
-                    elif (result['status'] == 'error') and ('hash' in result):
+                    # if (result['status'] == 'ok') and ('hash' in result):
+                    #     self.task_hashes.remove(result['hash'])
+                    # # error? remove from self.task_hashes. max_retries won't allow it to come back too many times!
+                    # elif (result['status'] == 'error') and ('hash' in result):
+                    #     self.task_hashes.remove(result['hash'])
+                    if 'hash' in result:
                         self.task_hashes.remove(result['hash'])
 
                     # update DB entry
@@ -1111,7 +1113,7 @@ class RoboaoArchiver(Archiver):
 
         return result
 
-    @timeout(seconds_before_timeout=60)
+    @timeout(seconds_before_timeout=120)
     def connect_to_db(self):
         """
             Connect to Robo-AO's MongoDB-powered database
@@ -1220,7 +1222,7 @@ class RoboaoArchiver(Archiver):
         self.db['coll_aux'] = _coll_aux
         self.db['program_pi'] = _program_pi
 
-    @timeout(seconds_before_timeout=60)
+    @timeout(seconds_before_timeout=120)
     def disconnect_from_db(self):
         """
             Disconnect from Robo-AO's MongoDB database.
@@ -1240,7 +1242,7 @@ class RoboaoArchiver(Archiver):
         else:
             self.logger.debug('No connection found.')
 
-    @timeout(seconds_before_timeout=60)
+    @timeout(seconds_before_timeout=120)
     def check_db_connection(self):
         """
             Check if DB connection is alive/established.
@@ -1268,7 +1270,7 @@ class RoboaoArchiver(Archiver):
 
         return True
 
-    @timeout(seconds_before_timeout=60)
+    @timeout(seconds_before_timeout=120)
     def get_raw_data_descriptors(self):
         """
             Parse source(s) containing raw data and get dates with observational data.
@@ -1311,7 +1313,7 @@ class RoboaoArchiver(Archiver):
         """
         return sorted([os.path.basename(_p) for _p in glob.glob(os.path.join(_location, _date, '*.fits.bz2'))])
 
-    @timeout(seconds_before_timeout=30)
+    @timeout(seconds_before_timeout=60)
     def insert_db_entry(self, _collection=None, _db_entry=None):
         """
             Insert a document _doc to collection _collection in DB.
@@ -1328,7 +1330,7 @@ class RoboaoArchiver(Archiver):
             self.logger.error('Error inserting {:s} into {:s}'.format(_db_entry, _collection))
             self.logger.error(e)
 
-    @timeout_decorator.timeout(30, use_signals=False)
+    @timeout_decorator.timeout(60, use_signals=False)
     def update_db_entry(self, _collection=None, upd=None):
         """
             Update DB entry
