@@ -1098,7 +1098,7 @@ def wget_script_by_id():
     # print(url)
     # print(flask.request.data)
     # flask.request.form['ids'] contains 'stringified' list with obs names, must eval that:
-    _ids = ast.literal_eval(str(flask.request.data)[1:])['ids']
+    _ids = ast.literal_eval(flask.request.data.decode('utf-8'))['ids']
     # print(_ids)
 
     user_id = flask_login.current_user.id
