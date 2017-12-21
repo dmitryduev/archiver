@@ -1406,7 +1406,7 @@ class RoboaoArchiver(Archiver):
 
                     # iterate over data locations:
                     for location in dates:
-                        for date in dates[location]:
+                        for date in dates[location][::-1]:
                             # Each individual step where I know something could go wrong is placed inside a try-except
                             # clause. Everything else is captured outside causing the main while loop to terminate.
                             self.logger.debug('Processing {:s} at {:s}'.format(date, location))
