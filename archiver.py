@@ -1045,6 +1045,24 @@ class RoboaoArchiver(Archiver):
             # take a nap
             time.sleep(1.5)
 
+        ''' process killed? let the world know! '''
+        # construct line with telemetry
+        try:
+            # UTC running? start_time #_enqueued_tasks system_CPU_usage_% system_memory_usage_%
+            _r = 'YES' if self.running else 'NO'
+            _start_time = self.start_time.strftime('%Y-%m-%d %H:%M:%S')
+            _n_tasks = len(self.task_hashes)
+            _cpu_usage = psutil.cpu_percent(interval=None)
+            _mem_usage = psutil.virtual_memory().percent
+            _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f}\n'.format(utc_now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                                                              _r, _start_time, _n_tasks, _cpu_usage, _mem_usage)
+            with open(os.path.join(self.config['path']['path_logs'], 'archiver_status'), 'w') as _f:
+                _f.write(_t)
+        except Exception as _e:
+            print(_e)
+            traceback.print_exc()
+            self.logger.error(_e)
+
     @staticmethod
     def task_runner(argdict_and_hash):
         """

@@ -1194,7 +1194,7 @@ def root():
                                           messages=messages))
 
 
-# serve root
+# serve search
 @app.route('/search', methods=['GET', 'POST'])
 @flask_login.login_required
 def search():
