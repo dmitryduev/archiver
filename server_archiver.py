@@ -1069,9 +1069,16 @@ def wget_script():
                             'science_program.program_id': _program,
                             'distributed.status': True})
         response_text = '#!/usr/bin/env bash\n'
+        # login and save cookies
+        response_text += '# put in your password here:\n'
+        response_text += 'wget --save-cookies cookies.txt ' + \
+                         f'--post-data \'username={user_id}&password=REPLACE_WITH_YOUR_ACCOUNT_PASSWORD\' ' + \
+                         'http://roboao.caltech.edu/archive/login\n'
+        # rm html, you don't need it
+        response_text = 'rm -f login\n'
         for obs in cursor:
-            response_text += 'wget http://{:s}/data/{:s}/{:s}/{:s}.tar.bz2\n'.format(url, _date_str,
-                                                                                obs['_id'], obs['_id'])
+            response_text += 'wget --load-cookies cookies.txt' + \
+                             'http://{:s}/data/{:s}/{:s}/{:s}.tar.bz2\n'.format(url, _date_str, obs['_id'], obs['_id'])
         # print(response_text)
 
         # generate .sh file on the fly
@@ -1117,10 +1124,18 @@ def wget_script_by_id():
 
     cursor = coll.find({'_id': {'$in': _ids}, 'distributed.status': True})
     response_text = '#!/usr/bin/env bash\n'
+    # login and save cookies
+    response_text += '# put in your password here:\n'
+    response_text += 'wget --save-cookies cookies.txt ' + \
+                     f'--post-data \'username={user_id}&password=REPLACE_WITH_YOUR_ACCOUNT_PASSWORD\' ' + \
+                     'http://roboao.caltech.edu/archive/login\n'
+    # rm html, you don't need it
+    response_text = 'rm -f login\n'
     for obs in cursor:
         _date_str = obs['date_utc'].strftime('%Y%m%d')
-        response_text += 'wget http://{:s}/data/{:s}/{:s}/{:s}.tar.bz2\n'.format(url, _date_str,
-                                                                                 obs['_id'], obs['_id'])
+        response_text += 'wget --load-cookies cookies.txt' + \
+                         'http://{:s}/data/{:s}/{:s}/{:s}.tar.bz2\n'.format(url, _date_str, obs['_id'], obs['_id'])
+
     # print(response_text)
 
     # generate .sh file on the fly
