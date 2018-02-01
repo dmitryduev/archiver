@@ -1322,11 +1322,11 @@ def query_db(search_form, _coll, _program_ids, _user_id):
             if ('h' in ra_str) and ('m' in ra_str) and ('s' in ra_str):
                 ra_str = ra_str[:-1]  # strip 's' at the end
                 for char in ('h', 'm'):
-                    ra_str.replace(char, ':')
+                    ra_str = ra_str.replace(char, ':')
             if ('d' in dec_str) and ('m' in dec_str) and ('s' in dec_str):
                 dec_str = dec_str[:-1]  # strip 's' at the end
                 for char in ('d', 'm'):
-                    dec_str.replace(char, ':')
+                    dec_str = dec_str.replace(char, ':')
 
             if (':' in ra_str) and (':' in dec_str):
                 ra, dec = radec_str2rad(ra_str, dec_str)
