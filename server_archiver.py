@@ -121,6 +121,36 @@ def radec_str2rad(_ra_str, _dec_str):
     return _ra, _dec
 
 
+def radec_str2geojson(ra_str, dec_str):
+
+    # hms -> ::, dms -> ::
+    if isinstance(ra_str, str) and isinstance(dec_str, str):
+        if ('h' in ra_str) and ('m' in ra_str) and ('s' in ra_str):
+            ra_str = ra_str[:-1]  # strip 's' at the end
+            for char in ('h', 'm'):
+                ra_str = ra_str.replace(char, ':')
+        if ('d' in dec_str) and ('m' in dec_str) and ('s' in dec_str):
+            dec_str = dec_str[:-1]  # strip 's' at the end
+            for char in ('d', 'm'):
+                dec_str = dec_str.replace(char, ':')
+
+        if (':' in ra_str) and (':' in dec_str):
+            ra, dec = radec_str2rad(ra_str, dec_str)
+            # convert to geojson-friendly degrees:
+            ra = ra * 180.0 / np.pi - 180.0
+            dec = dec * 180.0 / np.pi
+        else:
+            raise Exception('Unrecognized string ra/dec format.')
+    else:
+        # already in degrees?
+        ra = float(ra_str)
+        # geojson-friendly ra:
+        ra -= 180.0
+        dec = float(dec_str)
+
+    return ra, dec
+
+
 def great_circle_distance(phi1, lambda1, phi2, lambda2):
     # input: dec1, ra1, dec2, ra2 [rad]
     # this is much faster than astropy.coordinates.Skycoord.separation
@@ -1318,22 +1348,7 @@ def query_db(search_form, _coll, _program_ids, _user_id):
         try:
             # try to guess format and convert to decimal degrees:
 
-            # hms -> ::, dms -> ::
-            if ('h' in ra_str) and ('m' in ra_str) and ('s' in ra_str):
-                ra_str = ra_str[:-1]  # strip 's' at the end
-                for char in ('h', 'm'):
-                    ra_str = ra_str.replace(char, ':')
-            if ('d' in dec_str) and ('m' in dec_str) and ('s' in dec_str):
-                dec_str = dec_str[:-1]  # strip 's' at the end
-                for char in ('d', 'm'):
-                    dec_str = dec_str.replace(char, ':')
-
-            if (':' in ra_str) and (':' in dec_str):
-                ra, dec = radec_str2rad(ra_str, dec_str)
-            else:
-                # already in radian?
-                ra = float(ra_str)
-                dec = float(dec_str)
+            ra, dec = radec_str2geojson(ra_str, dec_str)
 
             # do cone search
             if 'cone_search_radius' in search_form:
@@ -1346,11 +1361,6 @@ def query_db(search_form, _coll, _program_ids, _user_id):
                         cone_search_radius *= np.pi/180.0/60.
                     elif search_form['cone_search_unit'] == 'deg':
                         cone_search_radius *= np.pi/180.0
-
-                    # ra, dec in geospatial-friendly format:
-                    ra *= 180.0 / np.pi
-                    ra -= 180.0
-                    dec *= 180.0 / np.pi
 
                     # print(ra_str, dec_str)
                     # print(ra, dec)
