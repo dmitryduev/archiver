@@ -1177,7 +1177,7 @@ def wget_script_by_id():
 
 
 # serve root
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'POST'])
 @flask_login.login_required
 def root():
 
