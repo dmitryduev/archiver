@@ -1030,11 +1030,19 @@ class RoboaoArchiver(Archiver):
                 # UTC running? start_time #_enqueued_tasks system_CPU_usage_% system_memory_usage_%
                 _r = 'YES' if self.running else 'NO'
                 _start_time = self.start_time.strftime('%Y-%m-%d %H:%M:%S')
+                _utc_now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 _n_tasks = len(self.task_hashes)
                 _cpu_usage = psutil.cpu_percent(interval=None)
                 _mem_usage = psutil.virtual_memory().percent
-                _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f}\n'.format(utc_now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-                                                    _r, _start_time, _n_tasks, _cpu_usage, _mem_usage)
+                _root = psutil.disk_usage('/').percent
+                _data_1 = psutil.disk_usage('/Data1').percent
+                _data_2 = psutil.disk_usage('/Data2').percent
+                _data_3 = psutil.disk_usage('/Data3').percent
+                _t = '{:s} {:s} {:s} {:d} {:.1f} {:.1f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.format(_utc_now, _r,
+                                                                                              _start_time, _n_tasks,
+                                                                                              _cpu_usage, _mem_usage,
+                                                                                              _root, _data_1,
+                                                                                              _data_2, _data_3)
                 with open(os.path.join(self.config['path']['path_logs'], 'archiver_status'), 'w') as _f:
                     _f.write(_t)
             except Exception as _e:
