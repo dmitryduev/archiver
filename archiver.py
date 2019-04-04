@@ -340,7 +340,6 @@ def get_fits_header(fits_file):
 
 def radec_str2rad(_ra_str, _dec_str):
     """
-
     :param _ra_str: 'H:M:S'
     :param _dec_str: 'D:M:S'
     :return: ra, dec in rad
@@ -349,9 +348,40 @@ def radec_str2rad(_ra_str, _dec_str):
     _ra = list(map(float, _ra_str.split(':')))
     _ra = (_ra[0] + _ra[1] / 60.0 + _ra[2] / 3600.0) * np.pi / 12.
     _dec = list(map(float, _dec_str.split(':')))
-    _dec = (_dec[0] + _dec[1] / 60.0 + _dec[2] / 3600.0) * np.pi / 180.
+    _sign = 1 if _dec[0] > 0 else -1
+    _dec = _sign * (abs(_dec[0]) + abs(_dec[1]) / 60.0 + abs(_dec[2]) / 3600.0) * np.pi / 180.
 
     return _ra, _dec
+
+
+def radec_str2geojson(ra_str, dec_str):
+
+    # hms -> ::, dms -> ::
+    if isinstance(ra_str, str) and isinstance(dec_str, str):
+        if ('h' in ra_str) and ('m' in ra_str) and ('s' in ra_str):
+            ra_str = ra_str[:-1]  # strip 's' at the end
+            for char in ('h', 'm'):
+                ra_str = ra_str.replace(char, ':')
+        if ('d' in dec_str) and ('m' in dec_str) and ('s' in dec_str):
+            dec_str = dec_str[:-1]  # strip 's' at the end
+            for char in ('d', 'm'):
+                dec_str = dec_str.replace(char, ':')
+
+        if (':' in ra_str) and (':' in dec_str):
+            ra, dec = radec_str2rad(ra_str, dec_str)
+            # convert to geojson-friendly degrees:
+            ra = ra * 180.0 / np.pi - 180.0
+            dec = dec * 180.0 / np.pi
+        else:
+            raise Exception('Unrecognized string ra/dec format.')
+    else:
+        # already in degrees?
+        ra = float(ra_str)
+        # geojson-friendly ra:
+        ra -= 180.0
+        dec = float(dec_str)
+
+    return ra, dec
 
 
 def great_circle_distance(phi1, lambda1, phi2, lambda2):
